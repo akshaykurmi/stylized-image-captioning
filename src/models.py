@@ -1,5 +1,6 @@
 import numpy as np
 import tensorflow as tf
+import tensorflow_probability as tfp
 
 
 class Encoder(tf.keras.Model):
@@ -14,7 +15,6 @@ class Encoder(tf.keras.Model):
     def call(self, inp):
         x = tf.keras.applications.resnet_v2.preprocess_input(inp)
         x = self.resnet(x)
-        x = tf.reshape(x, shape=(x.shape[0], -1, x.shape[3]))
         return x
 
     @property
@@ -73,6 +73,7 @@ class Generator(tf.keras.Model):
 
     def train_mle_forward(self, encoder_output, sequences, teacher_forcing_rate=1, training=False):
         predictions, attention_alphas = [], []
+        encoder_output = self._reshape_encoder_output(encoder_output)
         memory_state, carry_state = self.init_lstm_states(encoder_output)
         for t in range(sequences.shape[-1]):
             sequences_t = sequences[:, t]
@@ -85,11 +86,36 @@ class Generator(tf.keras.Model):
             attention_alphas.append(attention_alpha)
         return tf.stack(predictions, axis=1), tf.stack(attention_alphas, axis=1)
 
+    def generate_caption(self, encoder_output, mode, start_id, end_id, max_len=20):
+        # TODO: Implement beam_search, MCTS caption generation
+        if mode not in ["stochastic", "deterministic", "beam_search", "mcts"]:
+            raise ValueError(f"Caption generation mode {mode} is not valid")
+        sequences = [tf.ones(encoder_output.shape[0], dtype=tf.int64) * start_id]
+        encoder_output = self._reshape_encoder_output(encoder_output)
+        memory_state, carry_state = self.init_lstm_states(encoder_output)
+        keep_generating_mask = tf.ones(10, dtype=tf.int64)
+        for t in range(1, max_len):
+            prediction, _, memory_state, carry_state = self.call(encoder_output, sequences[t - 1],
+                                                                 memory_state, carry_state)
+            if mode == "stochastic":
+                dist = tfp.distributions.Categorical(probs=prediction)
+                tokens = dist.sample()
+            elif mode == "deterministic":
+                tokens = tf.argmax(prediction, axis=1)
+            tokens *= keep_generating_mask
+            sequences.append(tokens)
+            keep_generating_mask = tf.cast(tokens != end_id, dtype=tf.int64) * keep_generating_mask
+        return tf.ragged.constant([tf.boolean_mask(t, t != 0).numpy() for t in tf.stack(sequences, axis=1)])
+
     def init_lstm_states(self, encoder_output):
         mean_encoder_output = tf.reduce_mean(encoder_output, axis=1)
         memory_state = self.dense_init_memory_state(mean_encoder_output)
         carry_state = self.dense_init_carry_state(mean_encoder_output)
         return memory_state, carry_state
+
+    @staticmethod
+    def _reshape_encoder_output(encoder_output):
+        return tf.reshape(encoder_output, shape=(encoder_output.shape[0], -1, encoder_output.shape[3]))
 
 
 class Discriminator(tf.keras.Model):
