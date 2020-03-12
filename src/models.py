@@ -6,8 +6,8 @@ class Encoder(tf.keras.Model):
     def __init__(self):
         super().__init__()
         self.resnet = tf.keras.applications.resnet_v2.ResNet101V2(include_top=False, weights="imagenet")
-        # average pooling to resize to 14 x 14 ?
-        # fine tune last few conv blocks ?
+        # TODO: average pooling to resize to 14 x 14?
+        # TODO: fine tune last few convolution blocks?
         for layer in self.resnet.layers:
             layer.trainable = False
 
@@ -72,11 +72,7 @@ class Generator(tf.keras.Model):
         return prediction, attention_alpha, memory_state, carry_state
 
     def train_mle_forward(self, encoder_output, sequences, teacher_forcing_rate=1, training=False):
-        batch_size, num_pixels, encoder_size = encoder_output.shape
-        predictions = tf.Variable(tf.zeros((batch_size, sequences.shape[-1], self.vocab_size)),
-                                  name="predictions", trainable=False, dtype=tf.float32)
-        attention_alphas = tf.Variable(tf.zeros((batch_size, sequences.shape[-1], num_pixels)),
-                                       name="attention_alphas", trainable=False, dtype=tf.float32)
+        predictions, attention_alphas = [], []
         memory_state, carry_state = self.init_lstm_states(encoder_output)
         for t in range(sequences.shape[-1]):
             sequences_t = sequences[:, t]
@@ -85,9 +81,9 @@ class Generator(tf.keras.Model):
             prediction, attention_alpha, memory_state, carry_state = self.call(encoder_output, sequences_t,
                                                                                memory_state, carry_state,
                                                                                training=training)
-            predictions[:, t, :].assign(prediction)
-            attention_alphas[:, t, :].assign(attention_alpha)
-        return predictions, attention_alphas
+            predictions.append(prediction)
+            attention_alphas.append(attention_alpha)
+        return tf.stack(predictions, axis=1), tf.stack(attention_alphas, axis=1)
 
     def init_lstm_states(self, encoder_output):
         mean_encoder_output = tf.reduce_mean(encoder_output, axis=1)
