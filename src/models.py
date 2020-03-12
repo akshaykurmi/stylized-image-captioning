@@ -90,10 +90,11 @@ class Generator(tf.keras.Model):
         # TODO: Implement beam_search, MCTS caption generation
         if mode not in ["stochastic", "deterministic", "beam_search", "mcts"]:
             raise ValueError(f"Caption generation mode {mode} is not valid")
-        sequences = [tf.ones(encoder_output.shape[0], dtype=tf.int64) * start_id]
+        batch_size = encoder_output.shape[0]
+        sequences = [tf.ones(batch_size, dtype=tf.int64) * start_id]
         encoder_output = self._reshape_encoder_output(encoder_output)
         memory_state, carry_state = self.init_lstm_states(encoder_output)
-        keep_generating_mask = tf.ones(10, dtype=tf.int64)
+        keep_generating_mask = tf.ones(batch_size, dtype=tf.int64)
         for t in range(1, max_len):
             prediction, _, memory_state, carry_state = self.call(encoder_output, sequences[t - 1],
                                                                  memory_state, carry_state)
@@ -105,7 +106,7 @@ class Generator(tf.keras.Model):
             tokens *= keep_generating_mask
             sequences.append(tokens)
             keep_generating_mask = tf.cast(tokens != end_id, dtype=tf.int64) * keep_generating_mask
-        return tf.ragged.constant([tf.boolean_mask(t, t != 0).numpy() for t in tf.stack(sequences, axis=1)])
+        return tf.stack(sequences, axis=1)
 
     def init_lstm_states(self, encoder_output):
         mean_encoder_output = tf.reduce_mean(encoder_output, axis=1)
