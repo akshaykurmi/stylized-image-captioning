@@ -4,8 +4,8 @@ import os
 import tensorflow as tf
 from tqdm import tqdm
 
-from .misc import set_seed
 from .models import Generator, Encoder
+from .utils import set_seed, MultiCheckpointManager
 
 logger = logging.getLogger(__name__)
 
@@ -35,9 +35,6 @@ def generator_mle_val_loss(encoder, generator, loss_fn, batch, dsa_lambda):
 
 
 def generator_mle_train(args, dataset_loader):
-    if os.path.exists(args.checkpoints_dir) and os.listdir(args.checkpoints_dir) and not args.overwrite_checkpoint_dir:
-        raise ValueError("Checkpoints directory {} already exists and is not empty".format(args.checkpoints_dir))
-
     logger.info("***** Training Generator using MLE - Starting *****")
 
     set_seed(args.seed)
@@ -48,7 +45,7 @@ def generator_mle_train(args, dataset_loader):
     val_dataset = dataset_loader.load("val", batch_size=args.generator_mle_batch_size)
     num_train_batches = tf.data.experimental.cardinality(train_dataset).numpy()
 
-    logger.info("-- Initializing models")
+    logger.info("-- Initializing")
     encoder = Encoder()
     generator = Generator(vocab_size=dataset_loader.tokenizer.vocab_size, lstm_units=args.generator_lstm_units,
                           embedding_units=args.generator_embedding_units, lstm_dropout=args.generator_lstm_dropout,
@@ -61,13 +58,20 @@ def generator_mle_train(args, dataset_loader):
     train_summary_writer = tf.summary.create_file_writer(os.path.join(args.log_dir, "train"))
     val_summary_writer = tf.summary.create_file_writer(os.path.join(args.log_dir, "val"))
 
-    global_step = 0
+    global_step = tf.Variable(0, dtype=tf.int64, trainable=False)
+    checkpoint_manager = MultiCheckpointManager(args.checkpoints_dir, args.overwrite_checkpoint_dir, {
+        "encoder": {"encoder": encoder},
+        "generator": {"generator": generator},
+        "generator_mle_params": {"optimizer": optimizer, "global_step": global_step}
+    })
+    checkpoint_manager.restore_latest()
+
     for epoch in range(args.generator_mle_epochs):
         logger.info(f"-- Epoch: {epoch + 1}/{args.generator_mle_epochs}")
         for step, train_batch in enumerate(tqdm(train_dataset, total=num_train_batches, desc="Batch", unit="batch")):
+            global_step.assign_add(1)
             loss, gradients = generator_mle_train_batch(encoder, generator, loss_fn,
                                                         train_batch, args.generator_mle_dsa_lambda)
-            global_step += 1
             optimizer.apply_gradients(zip(gradients, encoder.trainable_variables + generator.trainable_variables))
             if global_step % args.generator_mle_logging_steps == 0:
                 with train_summary_writer.as_default():
@@ -78,5 +82,7 @@ def generator_mle_train(args, dataset_loader):
                           for val_batch in val_dataset]
                 with val_summary_writer.as_default():
                     tf.summary.scalar("generator_mle_loss", tf.reduce_mean(losses), step=global_step)
+            if global_step % args.generator_mle_checkpoint_steps == 0:
+                checkpoint_manager.save(checkpoint_number=global_step)
 
     logger.info("***** Training Generator using MLE - Ended *****")
