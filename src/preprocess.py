@@ -14,6 +14,18 @@ class Tokenizer:
     def vocab_size(self):
         return len(self.token_2_index)
 
+    @property
+    def start_id(self):
+        return self.token_2_index[self.start]
+
+    @property
+    def end_id(self):
+        return self.token_2_index[self.end]
+
+    @property
+    def pad_id(self):
+        return self.token_2_index[self.pad]
+
     def preprocess(self, text):
         t = text.lower()
         t = re.sub(f"([{string.punctuation}])", r" \1 ", t)
