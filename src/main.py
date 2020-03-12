@@ -3,7 +3,7 @@ import os
 import argparse
 
 from .datasets import PersonalityCaptions, DatasetLoader
-from .train import generator_mle_train
+from .train import generator_mle_train, discriminator_mle_train
 from .utils import init_logging
 
 args = argparse.Namespace()
@@ -44,7 +44,7 @@ if args.run_pretrain_generator:
     generator_mle_train(args, dataset_loader)
 
 if args.run_pretrain_discriminator:
-    pass
+    discriminator_mle_train(args, dataset_loader)
 
 if args.run_adversarial_training:
     pass
