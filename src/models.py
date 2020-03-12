@@ -1,3 +1,4 @@
+import numpy as np
 import tensorflow as tf
 
 
@@ -6,6 +7,7 @@ class Encoder(tf.keras.Model):
         super().__init__()
         self.resnet = tf.keras.applications.resnet_v2.ResNet101V2(include_top=False, weights="imagenet")
         # average pooling to resize to 14 x 14 ?
+        # fine tune last few conv blocks ?
         for layer in self.resnet.layers:
             layer.trainable = False
 
@@ -14,6 +16,10 @@ class Encoder(tf.keras.Model):
         x = self.resnet(x)
         x = tf.reshape(x, shape=(x.shape[0], -1, x.shape[3]))
         return x
+
+    @property
+    def output_shape(self):
+        return self.resnet.layers[-1].output_shape
 
 
 class EncoderGeneratorAttention(tf.keras.layers.Layer):
@@ -55,37 +61,33 @@ class Generator(tf.keras.Model):
         self.dense_lstm_output = tf.keras.layers.Dense(units=self.vocab_size, activation="softmax")
         self.dropout = tf.keras.layers.Dropout(rate=0.5)
 
-    def call(self, encoder_output, sequences, sequence_lengths, training=False):
+    def call(self, encoder_output, sequences_t, memory_state, carry_state, training=False):
+        embeddings = self.embedding(sequences_t)
+        attention_weighted_encoding, attention_alpha = self.attention(encoder_output, carry_state)
+        beta_gate = self.dense_f_beta(carry_state)
+        attention_weighted_encoding *= beta_gate
+        lstm_inputs = tf.concat([embeddings, attention_weighted_encoding], axis=1)
+        _, (memory_state, carry_state) = self.lstm(lstm_inputs, [memory_state, carry_state])
+        prediction = self.dense_lstm_output(self.dropout(carry_state, training=training))
+        return prediction, attention_alpha, memory_state, carry_state
+
+    def train_mle_forward(self, encoder_output, sequences, teacher_forcing_rate=1, training=False):
         batch_size, num_pixels, encoder_size = encoder_output.shape
-
-        sorted_indices = tf.argsort(sequence_lengths, direction="DESCENDING")
-        encoder_output = tf.gather(encoder_output, indices=sorted_indices)
-        sequences = tf.gather(sequences, indices=sorted_indices)
-        sequence_lengths = tf.gather(sequence_lengths, indices=sorted_indices)
-
-        iteration_lengths = (sequence_lengths - 1).numpy()
-        predictions = tf.Variable(tf.zeros((batch_size, max(iteration_lengths), self.vocab_size)),
+        predictions = tf.Variable(tf.zeros((batch_size, sequences.shape[-1], self.vocab_size)),
                                   name="predictions", trainable=False, dtype=tf.float32)
-        attention_alphas = tf.Variable(tf.zeros((batch_size, max(iteration_lengths), num_pixels)),
+        attention_alphas = tf.Variable(tf.zeros((batch_size, sequences.shape[-1], num_pixels)),
                                        name="attention_alphas", trainable=False, dtype=tf.float32)
-
-        embeddings = self.embedding(sequences)
         memory_state, carry_state = self.init_lstm_states(encoder_output)
-
-        for t in range(max(iteration_lengths)):
-            batch_size_t = sum([l > t for l in iteration_lengths])
-            attention_weighted_encoding, attention_alpha = self.attention(encoder_output[:batch_size_t],
-                                                                          carry_state[:batch_size_t])
-            beta_gate = self.dense_f_beta(carry_state[:batch_size_t])
-            attention_weighted_encoding *= beta_gate
-            lstm_inputs = tf.concat([embeddings[:batch_size_t, t, :], attention_weighted_encoding], axis=1)
-            _, (memory_state, carry_state) = self.lstm(lstm_inputs,
-                                                       [memory_state[:batch_size_t], carry_state[:batch_size_t]])
-            prediction = self.dense_lstm_output(self.dropout(carry_state, training=training))
-            predictions[:batch_size_t, t, :].assign(prediction)
-            attention_alphas[:batch_size_t, t, :].assign(attention_alpha)
-
-        return predictions, attention_alphas, sequences, iteration_lengths, sorted_indices
+        for t in range(sequences.shape[-1]):
+            sequences_t = sequences[:, t]
+            if t > 0 and np.random.uniform() > teacher_forcing_rate:
+                sequences_t = tf.argmax(predictions[:, t - 1, :], axis=1)
+            prediction, attention_alpha, memory_state, carry_state = self.call(encoder_output, sequences_t,
+                                                                               memory_state, carry_state,
+                                                                               training=training)
+            predictions[:, t, :].assign(prediction)
+            attention_alphas[:, t, :].assign(attention_alpha)
+        return predictions, attention_alphas
 
     def init_lstm_states(self, encoder_output):
         mean_encoder_output = tf.reduce_mean(encoder_output, axis=1)
