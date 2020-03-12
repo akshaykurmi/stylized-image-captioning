@@ -71,21 +71,21 @@ class DatasetLoader:
 
     def load(self, split, batch_size):
         data = self.dataset.load(split)
+        for d in data:
+            d.update({"caption": self.tokenizer.texts_to_sequences([d["caption"]])[0]})
+        data = list(sorted(data, key=lambda d: len(d["caption"])))
         image_paths = tf.convert_to_tensor([d["image_path"] for d in data])
-        sequences = tf.ragged.constant([self.tokenizer.texts_to_sequences([d["caption"]])[0] for d in data])
-        sequence_lengths = tf.convert_to_tensor([t.shape[0] for t in sequences])
-
-        tf_dataset = tf.data.Dataset.from_tensor_slices((image_paths, sequences, sequence_lengths))
+        sequences = tf.ragged.constant([d["caption"] for d in data])
+        tf_dataset = tf.data.Dataset.from_tensor_slices((image_paths, sequences))
         tf_dataset = tf_dataset.map(self._dataset_mapper, num_parallel_calls=tf.data.experimental.AUTOTUNE)
-        tf_dataset = tf_dataset.shuffle(buffer_size=1000, reshuffle_each_iteration=True)
-        tf_dataset = tf_dataset.padded_batch(batch_size, padded_shapes=([299, 299, 3], [None], []))
+        tf_dataset = tf_dataset.padded_batch(batch_size, padded_shapes=([299, 299, 3], [None]))
         tf_dataset = tf_dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
         return tf_dataset
 
     @staticmethod
-    def _dataset_mapper(image_path, sequence, sequence_length):
+    def _dataset_mapper(image_path, sequence):
         img = tf.io.read_file(image_path)
         img = tf.image.decode_jpeg(img, channels=3)
         img = tf.cast(img, dtype=tf.float32)
         img = tf.image.resize(img, [299, 299])
-        return img, sequence, sequence_length
+        return img, sequence
