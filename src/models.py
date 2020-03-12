@@ -121,19 +121,22 @@ class Generator(tf.keras.Model):
 class Discriminator(tf.keras.Model):
     def __init__(self, vocab_size):
         super().__init__()
-        self.embedding = tf.keras.layers.Embedding(input_dim=vocab_size, output_dim=256)
-        self.gru1 = tf.keras.layers.Bidirectional(
-            tf.keras.layers.GRU(units=512, activation="tanh", return_sequences=True))
-        self.gru2 = tf.keras.layers.Bidirectional(tf.keras.layers.GRU(units=512, activation="tanh"))
-        self.dense1 = tf.keras.layers.Dense(units=2048, activation="relu")
+        self.pooling = tf.keras.layers.GlobalAveragePooling2D()
+        self.embedding = tf.keras.layers.Embedding(input_dim=vocab_size, output_dim=512)
+        self.lstm1 = tf.keras.layers.Bidirectional(
+            tf.keras.layers.LSTM(units=512, activation="tanh", return_sequences=True))
+        self.lstm2 = tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(units=512, activation="tanh"))
+        self.dense1 = tf.keras.layers.Dense(units=1024, activation="relu")
         self.dropout = tf.keras.layers.Dropout(rate=0.2)
         self.dense2 = tf.keras.layers.Dense(units=1, activation="sigmoid")
 
-    def call(self, inp, training=False):
-        x = self.embedding(inp)
-        x = self.gru1(x)
-        x = self.gru2(x)
-        x = self.dense1(x)
+    def call(self, encoder_output, sequences, training=False):
+        encoder_output = self.pooling(encoder_output)
+        embeddings = self.embedding(sequences)
+        lstm1_out = self.lstm1(embeddings)
+        lstm2_out = self.lstm2(lstm1_out)
+        all_features = tf.concat([encoder_output, lstm2_out], axis=1)
+        x = self.dense1(all_features)
         x = self.dropout(x, training=training)
         x = self.dense2(x)
         return x
