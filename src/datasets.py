@@ -6,7 +6,7 @@ import urllib.request
 from urllib.error import HTTPError
 
 import tensorflow as tf
-from preprocess import Tokenizer
+from .preprocess import Tokenizer
 from tqdm import tqdm
 
 
