@@ -29,8 +29,8 @@ args.generator_mle_grad_clipvalue = 5.
 args.generator_mle_dsa_lambda = 1.
 args.generator_mle_batch_size = 64
 args.generator_mle_epochs = 20
-args.generator_mle_logging_steps = 10
-args.generator_mle_validate_steps = 2000
+args.generator_mle_logging_steps = 1
+args.generator_mle_validate_steps = 1000
 
 init_logging(args.log_dir)
 
