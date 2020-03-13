@@ -35,6 +35,18 @@ args.generator_mle_logging_steps = 1
 args.generator_mle_validate_steps = 1000
 args.generator_mle_checkpoint_steps = 50
 
+args.discriminator_embedding_units = 512
+args.discriminator_lstm_units = 512
+args.discriminator_mle_learning_rate = 1e-4
+args.discriminator_mle_grad_clipvalue = 5.
+args.discriminator_mle_batch_size = 64
+args.discriminator_mle_faking_batch_size = 256
+args.discriminator_mle_neg_sample_weight = 0.5
+args.discriminator_mle_epochs = 10
+args.discriminator_mle_logging_steps = 1
+args.discriminator_mle_validate_steps = 1000
+args.discriminator_mle_checkpoint_steps = 50
+
 init_logging(args.log_dir)
 
 personality_captions = PersonalityCaptions(args.data_dir)
