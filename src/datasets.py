@@ -88,7 +88,7 @@ class DatasetLoader:
         tf_dataset = tf_dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
         return tf_dataset
 
-    def load_discriminator_dataset(self, split, batch_size, faking_batch_size, encoder, generator):
+    def load_discriminator_dataset(self, split, encoder, generator, batch_size, faking_batch_size, neg_sample_weight):
         true_data = self.dataset.load(split)
         # TODO: is sampling only 1/3 of the data each time enough?
         # TODO: do this for train, but not for val?
@@ -96,7 +96,8 @@ class DatasetLoader:
         for d in true_data:
             d.update({
                 "caption": self.tokenizer.texts_to_sequences([d["caption"]])[0],
-                "discriminator_label": 1
+                "discriminator_label": 1,
+                "sample_weight": 1
             })
         logger.info("-- Generating fake data")
         fake_captions = self._generate_fake_captions(true_data, faking_batch_size, encoder, generator)
@@ -104,16 +105,20 @@ class DatasetLoader:
         np.random.shuffle(shuffled_captions)
         fake_data, shuffled_data = [], []
         for d, fake_cap, shuffled_cap in zip(true_data, fake_captions, shuffled_captions):
-            fake_data.append({**d, "caption": fake_cap, "discriminator_label": 0})
-            shuffled_data.append({**d, "caption": shuffled_cap, "discriminator_label": 0})
+            fake_data.append({**d, "caption": fake_cap, "discriminator_label": 0,
+                              "sample_weight": neg_sample_weight})
+            shuffled_data.append({**d, "caption": shuffled_cap, "discriminator_label": 0,
+                                  "sample_weight": neg_sample_weight})
         data = true_data + fake_data + shuffled_data
         np.random.shuffle(data)
         image_paths = tf.convert_to_tensor([d["image_path"] for d in data])
         sequences = tf.ragged.constant([d["caption"] for d in data])
-        discriminator_labels = tf.ragged.constant([d["discriminator_label"] for d in data])
-        tf_dataset = tf.data.Dataset.from_tensor_slices((image_paths, sequences, discriminator_labels))
-        tf_dataset = tf_dataset.map(self._image_sequence_label_mapper, num_parallel_calls=tf.data.experimental.AUTOTUNE)
-        tf_dataset = tf_dataset.padded_batch(batch_size, padded_shapes=([299, 299, 3], [None], [None]))
+        discriminator_labels = tf.convert_to_tensor([[d["discriminator_label"]] for d in data])
+        sample_weights = tf.convert_to_tensor([[d["sample_weight"]] for d in data])
+        tf_dataset = tf.data.Dataset.from_tensor_slices((image_paths, sequences, discriminator_labels, sample_weights))
+        tf_dataset = tf_dataset.map(self._image_sequence_label_weight_mapper,
+                                    num_parallel_calls=tf.data.experimental.AUTOTUNE)
+        tf_dataset = tf_dataset.padded_batch(batch_size, padded_shapes=([299, 299, 3], [None], [None], [None]))
         tf_dataset = tf_dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
         return tf_dataset
 
@@ -127,8 +132,8 @@ class DatasetLoader:
         num_batches = tf.data.experimental.cardinality(d).numpy()
         for image_batch in tqdm(d, total=num_batches, desc="Batch", unit="batch"):
             captions = self._generate_caption(image_batch, encoder, generator).numpy()
-            captions = [c[c != self.tokenizer.pad_id] for c in captions]
-            fake_captions.append(captions)
+            captions = [c[c != self.tokenizer.pad_id].tolist() for c in captions]
+            fake_captions.extend(captions)
         return fake_captions
 
     @tf.function
@@ -138,9 +143,9 @@ class DatasetLoader:
                                           end_id=self.tokenizer.end_id)
 
     @staticmethod
-    def _image_sequence_label_mapper(image_path, sequence, label):
+    def _image_sequence_label_weight_mapper(image_path, sequence, label, weight):
         img, sequence = DatasetLoader._image_sequence_mapper(image_path, sequence)
-        return img, sequence, label
+        return img, sequence, label, weight
 
     @staticmethod
     def _image_sequence_mapper(image_path, sequence):
