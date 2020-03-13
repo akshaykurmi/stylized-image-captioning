@@ -120,13 +120,13 @@ class Generator(tf.keras.Model):
 
 
 class Discriminator(tf.keras.Model):
-    def __init__(self, vocab_size):
+    def __init__(self, vocab_size, embedding_units, lstm_units):
         super().__init__()
         self.pooling = tf.keras.layers.GlobalAveragePooling2D()
-        self.embedding = tf.keras.layers.Embedding(input_dim=vocab_size, output_dim=512)
+        self.embedding = tf.keras.layers.Embedding(input_dim=vocab_size, output_dim=embedding_units)
         self.lstm1 = tf.keras.layers.Bidirectional(
-            tf.keras.layers.LSTM(units=512, activation="tanh", return_sequences=True))
-        self.lstm2 = tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(units=512, activation="tanh"))
+            tf.keras.layers.LSTM(units=lstm_units, activation="tanh", return_sequences=True))
+        self.lstm2 = tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(units=lstm_units, activation="tanh"))
         self.dense1 = tf.keras.layers.Dense(units=1024, activation="relu")
         self.dropout = tf.keras.layers.Dropout(rate=0.2)
         self.dense2 = tf.keras.layers.Dense(units=1, activation="sigmoid")
