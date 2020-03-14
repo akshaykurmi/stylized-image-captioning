@@ -42,7 +42,6 @@ args.generator_pretrain_checkpoint_steps = 50
 args.discriminator_pretrain_learning_rate = 1e-4
 args.discriminator_pretrain_grad_clipvalue = 5.
 args.discriminator_pretrain_batch_size = 64
-args.discriminator_pretrain_faking_batch_size = 256
 args.discriminator_pretrain_neg_sample_weight = 0.5
 args.discriminator_pretrain_epochs = 10
 args.discriminator_pretrain_logging_steps = 1

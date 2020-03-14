@@ -28,6 +28,7 @@ def generator_loss_pg(batch, encoder, generator, discriminator, loss_fn):
 @tf.function
 def generator_train_batch_mle(batch, encoder, generator, loss_fn, dsa_lambda):
     with tf.GradientTape() as tape:
+        # TODO: calling another tf.function causes warnings. why??
         loss = generator_loss_mle(batch, encoder, generator, loss_fn, dsa_lambda)
         gradients = tape.gradient(loss, generator.trainable_variables)
     return loss, gradients
@@ -47,6 +48,7 @@ def generator_loss_mle(batch, encoder, generator, loss_fn, dsa_lambda):
 @tf.function
 def discriminator_train_batch_mle(true_batch, fake_batch, shuffled_batch, encoder, discriminator, loss_fn):
     with tf.GradientTape() as tape:
+        # TODO: calling another tf.function causes warnings. why??
         loss = discriminator_loss_mle(true_batch, encoder, discriminator, loss_fn)
         loss += discriminator_loss_mle(fake_batch, encoder, discriminator, loss_fn)
         loss += discriminator_loss_mle(shuffled_batch, encoder, discriminator, loss_fn)
@@ -71,7 +73,7 @@ def generate_fake_captions(true_batch, encoder, generator, tokenizer, neg_sample
     encoder_outputs = encoder(images)
     captions = generator.generate_caption(encoder_outputs, mode="deterministic", start_id=tokenizer.start_id,
                                           end_id=tokenizer.end_id)
-    return images, captions, tf.zeros(batch_size), tf.repeat(neg_sample_weight, batch_size)
+    return images, captions, tf.zeros((batch_size, 1)), tf.ones((batch_size, 1)) * neg_sample_weight
 
 
 def pretrain_generator(args, dataset_loader):
@@ -168,7 +170,8 @@ def pretrain_discriminator(args, dataset_loader):
 
     for true_batch, shuffled_batch in tqdm(zip(train_true_dataset, train_shuffled_dataset), desc="Batch", unit="batch"):
         global_step.assign_add(1)
-        fake_batch = generate_fake_captions(true_batch, encoder, generator, dataset_loader.tokenizer)
+        fake_batch = generate_fake_captions(true_batch, encoder, generator, dataset_loader.tokenizer,
+                                            args.discriminator_pretrain_neg_sample_weight)
         loss, gradients = discriminator_train_batch_mle(true_batch, fake_batch, shuffled_batch,
                                                         encoder, discriminator, loss_fn)
         optimizer.apply_gradients(zip(gradients, discriminator.trainable_variables))
@@ -180,7 +183,8 @@ def pretrain_discriminator(args, dataset_loader):
             logger.info("-- Calculating validation loss")
             losses = []
             for val_true_batch, val_shuffled_batch in zip(val_true_dataset, val_shuffled_dataset):
-                val_fake_batch = generate_fake_captions(val_true_batch, encoder, generator, dataset_loader.tokenizer)
+                val_fake_batch = generate_fake_captions(val_true_batch, encoder, generator, dataset_loader.tokenizer,
+                                                        args.discriminator_pretrain_neg_sample_weight)
                 losses.append(
                     discriminator_loss_mle(val_true_batch, encoder, discriminator, loss_fn) +
                     discriminator_loss_mle(val_fake_batch, encoder, discriminator, loss_fn) +
@@ -262,7 +266,8 @@ def adversarially_train_generator_and_discriminator(args, dataset_loader):
             discriminator_step.assign_add(1)
             true_batch = next(discriminator_train_true_dataset)
             shuffled_batch = next(discriminator_train_shuffled_dataset)
-            fake_batch = generate_fake_captions(true_batch, encoder, generator, dataset_loader.tokenizer)
+            fake_batch = generate_fake_captions(true_batch, encoder, generator, dataset_loader.tokenizer,
+                                                args.discriminator_adversarial_neg_sample_weight)
             loss, gradients = discriminator_train_batch_mle(true_batch, fake_batch, shuffled_batch,
                                                             encoder, discriminator, discriminator_loss_fn)
             discriminator_optimizer.apply_gradients(zip(gradients, discriminator.trainable_variables))
@@ -284,7 +289,8 @@ def adversarially_train_generator_and_discriminator(args, dataset_loader):
             discriminator_losses = []
             for val_true_batch, val_shuffled_batch in zip(discriminator_val_true_dataset,
                                                           discriminator_val_shuffled_dataset):
-                val_fake_batch = generate_fake_captions(val_true_batch, encoder, generator, dataset_loader.tokenizer)
+                val_fake_batch = generate_fake_captions(val_true_batch, encoder, generator, dataset_loader.tokenizer,
+                                                        args.discriminator_adversarial_neg_sample_weight)
                 discriminator_losses.append(
                     discriminator_loss_mle(val_true_batch, encoder, discriminator, discriminator_loss_fn) +
                     discriminator_loss_mle(val_fake_batch, encoder, discriminator, discriminator_loss_fn) +
