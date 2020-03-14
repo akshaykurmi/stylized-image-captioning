@@ -4,6 +4,7 @@ import os
 import tarfile
 import urllib.request
 from urllib.error import HTTPError
+import joblib
 
 import io
 import numpy as np
@@ -73,6 +74,19 @@ class DatasetLoader:
         self.dataset = dataset
         self.tokenizer = Tokenizer()
         self.tokenizer.fit_on_texts([d["caption"] for d in self.dataset.load("train")])
+
+    def encode_images(self, split):
+        data = self.dataset.load(split)
+        image_paths = tf.convert_to_tensor([d["image_path"] for d in data])
+        tf_dataset = tf.data.Dataset.from_tensor_slices((image_paths,image_paths))
+        tf_dataset = tf_dataset.map(self._image_imgpath_mapper, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+        tf_dataset = tf_dataset.batch(1)
+        tf_dataset = tf_dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
+        for img_tensor, path_byte in tf_dataset:
+            path = path_byte.numpy()[0].decode("utf-8")
+            path_pkl = path[:-3] + "pkl"
+            preprocessed_img = tf.keras.applications.resnet_v2.preprocess_input(img_tensor)
+            joblib.dump(preprocessed_img.numpy(), open(path_pkl, "wb"))
 
     def load_generator_dataset(self, split, batch_size):
         data = self.dataset.load(split)
@@ -151,6 +165,11 @@ class DatasetLoader:
     def _image_sequence_mapper(image_path, sequence):
         img = DatasetLoader._image_mapper(image_path)
         return img, sequence
+
+    @staticmethod
+    def _image_imgpath_mapper(image_path, img_path):
+        img = DatasetLoader._image_mapper(image_path)
+        return img, img_path
 
     @staticmethod
     def _image_mapper(image_path):
