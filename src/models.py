@@ -109,6 +109,7 @@ class Generator(tf.keras.Model):
         return tf.stack(sequences, axis=1)
 
     def init_lstm_states(self, encoder_output):
+        # TODO: add random vector z here?
         mean_encoder_output = tf.reduce_mean(encoder_output, axis=1)
         memory_state = self.dense_init_memory_state(mean_encoder_output)
         carry_state = self.dense_init_carry_state(mean_encoder_output)
