@@ -10,7 +10,7 @@ import numpy as np
 import tensorflow as tf
 from tqdm import tqdm
 
-from .preprocess import Tokenizer
+from preprocess import Tokenizer
 
 logger = logging.getLogger(__name__)
 
