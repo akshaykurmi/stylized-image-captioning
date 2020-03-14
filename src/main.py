@@ -52,12 +52,17 @@ args.discriminator_pretrain_checkpoint_steps = 50
 args.generator_adversarial_learning_rate = 1e-4
 args.generator_adversarial_grad_clipvalue = 5.
 args.generator_adversarial_logging_steps = 1
+args.generator_adversarial_batch_size = 64
 args.discriminator_adversarial_learning_rate = 1e-4
 args.discriminator_adversarial_grad_clipvalue = 5.
 args.discriminator_adversarial_logging_steps = 1
+args.discriminator_adversarial_batch_size = 64
+args.discriminator_adversarial_neg_sample_weight = 0.5
 args.adversarial_rounds = 10000
 args.adversarial_validate_rounds = 50
 args.adversarial_checkpoint_rounds = 5
+args.adversarial_g_steps = 1
+args.adversarial_d_steps = 3
 
 init_logging(args.log_dir)
 
