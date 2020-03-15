@@ -71,7 +71,7 @@ class Generator(tf.keras.Model):
         prediction = self.dense_lstm_output(self.dropout(carry_state, training=training))
         return prediction, attention_alpha, memory_state, carry_state
 
-    def train_mle_forward(self, encoder_output, sequences, teacher_forcing_rate=1, training=False):
+    def forward(self, encoder_output, sequences, teacher_forcing_rate=1, training=False):
         predictions, attention_alphas = [], []
         encoder_output = self._reshape_encoder_output(encoder_output)
         memory_state, carry_state = self.init_lstm_states(encoder_output)
@@ -107,6 +107,25 @@ class Generator(tf.keras.Model):
             sequences.append(tokens)
             keep_generating_mask = tf.cast(tokens != end_id, dtype=tf.int64) * keep_generating_mask
         return tf.stack(sequences, axis=1)
+
+    def sample(self, encoder_output, initial_values, sequence_length, n_samples):
+        encoder_output = self._reshape_encoder_output(encoder_output)
+        batch_size, partial_sequence_length = initial_values.shape[0], initial_values.shape[1]
+        samples = []
+        # TODO: can this be more efficient?
+        for n in range(n_samples):
+            sequences = [tf.argmax(initial_values[:, 0, :], axis=1)]
+            memory_state, carry_state = self.init_lstm_states(encoder_output)
+            for t in range(1, sequence_length):
+                prediction, _, memory_state, carry_state = self.call(encoder_output, sequences[t - 1],
+                                                                     memory_state, carry_state)
+                if t < partial_sequence_length:
+                    tokens = tf.argmax(prediction, axis=1)
+                else:
+                    tokens = tfp.distributions.Categorical(probs=prediction, dtype=tf.int64).sample()
+                sequences.append(tokens)
+            samples.append(tf.stack(sequences, axis=1))
+        return samples
 
     def init_lstm_states(self, encoder_output):
         # TODO: add random vector z here?
