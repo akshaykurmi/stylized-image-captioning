@@ -11,18 +11,55 @@ logger = logging.getLogger(__name__)
 
 
 class PolicyGradientLoss:
-    def __call__(self, y_true, y_pred, rewards):
-        return 0.0
+    def __call__(self, captions, predictions, rewards):
+        predictions = tf.reshape(predictions, shape=(-1, predictions.shape[-1]))
+        captions = tf.reshape(captions, shape=(-1,))
+        rewards = tf.reshape(rewards, shape=(-1,))
+        indices = tf.stack([tf.range(captions.shape[0]), captions], axis=1)
+        predictions = tf.gather_nd(predictions, indices)
+        loss = -tf.reduce_sum(tf.math.log(predictions) * rewards)
+        return loss
+
+
+class MonteCarloRollout:
+    def __init__(self, generator, n_rollouts, update_rate):
+        self.generator = generator
+        self.update_rate = update_rate
+        self.n_rollouts = n_rollouts
+
+    def update_weights(self, generator):
+        # TODO: how to incorporate update rate here?
+        self.generator.set_weights(generator.get_weights())
+
+    def calculate_rewards(self, encoder_output, predictions, discriminator):
+        sequence_length = predictions.shape[1]
+        rewards = []
+        for t in range(1, sequence_length + 1):
+            initial_values = predictions[:, :t, :]
+            samples = self.generator.sample(encoder_output, initial_values, sequence_length, self.n_rollouts)
+            rewards_t = tf.reduce_mean([discriminator(encoder_output, s) for s in samples], axis=0)
+            rewards.append(rewards_t)
+        return tf.squeeze(tf.stack(rewards, axis=1))
 
 
 @tf.function
-def generator_train_batch_pg(batch, encoder, generator, discriminator, loss_fn):
-    return 0, 0
+def generator_train_batch_pg(batch, encoder, generator, discriminator, loss_fn, rollout):
+    with tf.GradientTape(watch_accessed_variables=False) as tape:
+        tape.watch(generator.trainable_variables)
+        loss = generator_loss_pg(batch, encoder, generator, discriminator, loss_fn, rollout)
+        gradients = tape.gradient(loss, generator.trainable_variables)
+    return loss, gradients
 
 
 @tf.function
-def generator_loss_pg(batch, encoder, generator, discriminator, loss_fn):
-    return 0
+def generator_loss_pg(batch, encoder, generator, discriminator, loss_fn, rollout):
+    logger.info("calculating loss")
+    images, captions = batch
+    encoder_output = encoder(images)
+    predictions, _ = generator.forward(encoder_output, captions)
+    rewards = rollout.calculate_rewards(encoder_output, predictions, discriminator)
+    loss = loss_fn(captions, predictions, rewards)
+    return loss
 
 
 @tf.function
@@ -38,7 +75,7 @@ def generator_train_batch_mle(batch, encoder, generator, loss_fn, dsa_lambda):
 def generator_loss_mle(batch, encoder, generator, loss_fn, dsa_lambda):
     images, captions = batch
     encoder_output = encoder(images)
-    predictions, attention_alphas = generator.train_mle_forward(encoder_output, captions)
+    predictions, attention_alphas = generator.forward(encoder_output, captions)
     loss = loss_fn(captions, predictions)
     # TODO: Include doubly stochastic attention loss?
     # loss += dsa_lambda * tf.reduce_mean(1. - tf.reduce_sum(attention_alphas, axis=1) ** 2)
@@ -209,9 +246,13 @@ def adversarially_train_generator_and_discriminator(args, dataset_loader):
     generator = Generator(vocab_size=dataset_loader.tokenizer.vocab_size, lstm_units=args.generator_lstm_units,
                           embedding_units=args.generator_embedding_units, lstm_dropout=args.generator_lstm_dropout,
                           attention_units=args.generator_attention_units, encoder_units=encoder.output_shape[-1])
+    generator_mc = Generator(vocab_size=dataset_loader.tokenizer.vocab_size, lstm_units=args.generator_lstm_units,
+                             embedding_units=args.generator_embedding_units, lstm_dropout=args.generator_lstm_dropout,
+                             attention_units=args.generator_attention_units, encoder_units=encoder.output_shape[-1])
     discriminator = Discriminator(vocab_size=dataset_loader.tokenizer.vocab_size,
                                   embedding_units=args.discriminator_embedding_units,
                                   lstm_units=args.discriminator_lstm_units)
+    rollout = MonteCarloRollout(generator_mc, args.adversarial_rollout_n, args.adversarial_rollout_update_rate)
 
     generator_loss_fn = PolicyGradientLoss()
     discriminator_loss_fn = tf.keras.losses.BinaryCrossentropy()
@@ -256,7 +297,7 @@ def adversarially_train_generator_and_discriminator(args, dataset_loader):
             generator_step.assign_add(1)
             train_batch = next(generator_train_dataset)
             loss, gradients = generator_train_batch_pg(train_batch, encoder, generator, discriminator,
-                                                       generator_loss_fn)
+                                                       generator_loss_fn, rollout)
             generator_optimizer.apply_gradients(zip(gradients, generator.trainable_variables))
             if generator_step % args.generator_adversarial_logging_steps == 0:
                 with train_summary_writer.as_default():
@@ -275,6 +316,8 @@ def adversarially_train_generator_and_discriminator(args, dataset_loader):
                 with train_summary_writer.as_default():
                     tf.summary.scalar("discriminator_adversarial_loss", loss, step=discriminator_step)
 
+        rollout.update_weights(generator)
+
         if round_ % args.adversarial_checkpoint_rounds:
             checkpoint_manager.save(["encoder", "generator", "discriminator", "adversarial_params"],
                                     checkpoint_number=round_)
@@ -283,7 +326,7 @@ def adversarially_train_generator_and_discriminator(args, dataset_loader):
         if round_ % args.adversarial_validate_rounds == 0:
             logger.info("-- Calculating generator validation loss")
             generator_losses = [
-                generator_loss_pg(val_batch, encoder, generator, discriminator, generator_loss_fn)
+                generator_loss_pg(val_batch, encoder, generator, discriminator, generator_loss_fn, rollout)
                 for val_batch in generator_val_dataset]
             logger.info("-- Calculating discriminator validation loss")
             discriminator_losses = []
