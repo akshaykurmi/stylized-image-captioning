@@ -62,6 +62,8 @@ args.adversarial_validate_rounds = 50
 args.adversarial_checkpoint_rounds = 5
 args.adversarial_g_steps = 1
 args.adversarial_d_steps = 3
+args.adversarial_rollout_n = 10
+args.adversarial_rollout_update_rate = 1
 
 init_logging(args.log_dir)
 
