@@ -61,6 +61,8 @@ class Generator(tf.keras.Model):
         self.dense_lstm_output = tf.keras.layers.Dense(units=self.vocab_size, activation="softmax")
         self.dropout = tf.keras.layers.Dropout(rate=0.5)
 
+        self.forward(tf.ones((1, 10, 10, 2048)), tf.ones((1, 10)))  # initialize weights
+
     def call(self, encoder_output, sequences_t, memory_state, carry_state, training=False):
         embeddings = self.embedding(sequences_t)
         attention_weighted_encoding, attention_alpha = self.attention(encoder_output, carry_state)
@@ -87,7 +89,7 @@ class Generator(tf.keras.Model):
         return tf.stack(predictions, axis=1), tf.stack(attention_alphas, axis=1)
 
     def generate_caption(self, encoder_output, mode, start_id, end_id, max_len=20):
-        # TODO: Implement beam_search, MCTS caption generation
+        # TODO: Implement beam_search
         if mode not in ["stochastic", "deterministic", "beam_search", "mcts"]:
             raise ValueError(f"Caption generation mode {mode} is not valid")
         batch_size = encoder_output.shape[0]
@@ -150,6 +152,8 @@ class Discriminator(tf.keras.Model):
         self.dense1 = tf.keras.layers.Dense(units=1024, activation="relu")
         self.dropout = tf.keras.layers.Dropout(rate=0.2)
         self.dense2 = tf.keras.layers.Dense(units=1, activation="sigmoid")
+
+        self.call(tf.ones((1, 10, 10, 2048)), tf.ones((1, 10)))  # initialize weights
 
     def call(self, encoder_output, sequences, training=False):
         encoder_output = self.pooling(encoder_output)
