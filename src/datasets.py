@@ -88,36 +88,31 @@ class DatasetLoader:
         tf_dataset = tf_dataset.repeat(repeat)
         return tf_dataset
 
-    def load_discriminator_dataset(self, split, batch_size, neg_sample_weight, repeat):
-        true_data = self.dataset.load(split)
-        random.shuffle(true_data)
-        for d in true_data:
+    def load_discriminator_dataset(self, split, batch_size, repeat, label, sample_weight, randomize_captions):
+        data = self.dataset.load(split)
+        random.shuffle(data)
+        for d in data:
             d.update({
                 "caption": self.tokenizer.texts_to_sequences([d["caption"]])[0],
-                "discriminator_label": 1,
-                "sample_weight": 1
+                "discriminator_label": label,
+                "sample_weight": sample_weight
             })
-        shuffled_captions = [d["caption"] for d in true_data]
-        random.shuffle(shuffled_captions)
-        shuffled_data = [
-            {**d, "caption": shuffled_caption, "discriminator_label": 0, "sample_weight": neg_sample_weight}
-            for d, shuffled_caption in zip(true_data, shuffled_captions)
-        ]
-        datasets = []
-        for data in (true_data, shuffled_data):
-            image_paths = tf.convert_to_tensor([d["image_path"] for d in data])
-            sequences = tf.ragged.constant([d["caption"] for d in data])
-            discriminator_labels = tf.convert_to_tensor([[d["discriminator_label"]] for d in data])
-            sample_weights = tf.convert_to_tensor([[d["sample_weight"]] for d in data])
-            tf_dataset = tf.data.Dataset.from_tensor_slices((image_paths, sequences,
-                                                             discriminator_labels, sample_weights))
-            tf_dataset = tf_dataset.map(self._image_sequence_label_weight_mapper,
-                                        num_parallel_calls=tf.data.experimental.AUTOTUNE)
-            tf_dataset = tf_dataset.padded_batch(batch_size, padded_shapes=([299, 299, 3], [None], [None], [None]))
-            tf_dataset = tf_dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
-            tf_dataset = tf_dataset.repeat(repeat)
-            datasets.append(tf_dataset)
-        return datasets
+        if randomize_captions:
+            randomized_caption_list = [d["caption"] for d in data]
+            random.shuffle(randomized_caption_list)
+            data = [{**d, "caption": c} for d, c in zip(data, randomized_caption_list)]
+        image_paths = tf.convert_to_tensor([d["image_path"] for d in data])
+        sequences = tf.ragged.constant([d["caption"] for d in data])
+        discriminator_labels = tf.convert_to_tensor([[d["discriminator_label"]] for d in data])
+        sample_weights = tf.convert_to_tensor([[d["sample_weight"]] for d in data])
+        tf_dataset = tf.data.Dataset.from_tensor_slices((image_paths, sequences,
+                                                         discriminator_labels, sample_weights))
+        tf_dataset = tf_dataset.map(self._image_sequence_label_weight_mapper,
+                                    num_parallel_calls=tf.data.experimental.AUTOTUNE)
+        tf_dataset = tf_dataset.padded_batch(batch_size, padded_shapes=([299, 299, 3], [None], [None], [None]))
+        tf_dataset = tf_dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
+        tf_dataset = tf_dataset.repeat(repeat)
+        return tf_dataset
 
     @staticmethod
     def _image_sequence_label_weight_mapper(image_path, sequence, label, weight):
