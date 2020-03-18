@@ -101,10 +101,10 @@ class DatasetLoader:
             randomized_caption_list = [d["caption"] for d in data]
             random.shuffle(randomized_caption_list)
             data = [{**d, "caption": c} for d, c in zip(data, randomized_caption_list)]
-        image_paths = tf.convert_to_tensor([d["image_path"] for d in data])
-        sequences = tf.ragged.constant([d["caption"] for d in data])
-        discriminator_labels = tf.convert_to_tensor([[d["discriminator_label"]] for d in data])
-        sample_weights = tf.convert_to_tensor([[d["sample_weight"]] for d in data])
+        image_paths = tf.convert_to_tensor([d["image_path"] for d in data], dtype=tf.string)
+        sequences = tf.ragged.constant([d["caption"] for d in data], dtype=tf.int64)
+        discriminator_labels = tf.convert_to_tensor([[d["discriminator_label"]] for d in data], dtype=tf.int32)
+        sample_weights = tf.convert_to_tensor([[d["sample_weight"]] for d in data], dtype=tf.float32)
         tf_dataset = tf.data.Dataset.from_tensor_slices((image_paths, sequences,
                                                          discriminator_labels, sample_weights))
         tf_dataset = tf_dataset.map(self._image_sequence_label_weight_mapper,
