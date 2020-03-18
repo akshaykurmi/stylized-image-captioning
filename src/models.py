@@ -112,20 +112,22 @@ class Generator(tf.keras.Model):
 
     def sample(self, encoder_output, initial_values, sequence_length, n_samples):
         encoder_output = self._reshape_encoder_output(encoder_output)
-        batch_size, partial_sequence_length = initial_values.shape[0], initial_values.shape[1]
+        init_sequence_length = initial_values.shape[1]
+        init_sequences = [tf.argmax(initial_values[:, 0, :], axis=1)]
+        init_memory_state, init_carry_state = self.init_lstm_states(encoder_output)
+        for t in range(1, init_sequence_length):
+            prediction, _, init_memory_state, init_carry_state = self.call(encoder_output, init_sequences[t - 1],
+                                                                           init_memory_state, init_carry_state)
+            init_sequences.append(tf.argmax(prediction, axis=1))
+
         samples = []
-        # TODO: can this be more efficient?
         for n in range(n_samples):
-            sequences = [tf.argmax(initial_values[:, 0, :], axis=1)]
-            memory_state, carry_state = self.init_lstm_states(encoder_output)
-            for t in range(1, sequence_length):
+            sequences = [tf.identity(s) for s in init_sequences]
+            memory_state, carry_state = tf.identity(init_memory_state), tf.identity(init_carry_state)
+            for t in range(init_sequence_length, sequence_length):
                 prediction, _, memory_state, carry_state = self.call(encoder_output, sequences[t - 1],
                                                                      memory_state, carry_state)
-                if t < partial_sequence_length:
-                    tokens = tf.argmax(prediction, axis=1)
-                else:
-                    tokens = tfp.distributions.Categorical(probs=prediction, dtype=tf.int64).sample()
-                sequences.append(tokens)
+                sequences.append(tfp.distributions.Categorical(probs=prediction, dtype=tf.int64).sample())
             samples.append(tf.stack(sequences, axis=1))
         return samples
 
