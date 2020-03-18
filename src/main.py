@@ -1,4 +1,5 @@
 import os
+import shutil
 
 import argparse
 
@@ -12,9 +13,10 @@ args.run_id = "run_1"
 args.base_dir = os.path.dirname(os.path.dirname(__file__))
 args.data_dir = os.path.join(args.base_dir, "data", "personality_captions")
 args.results_dir = os.path.join(args.base_dir, "results")
-args.checkpoints_dir = os.path.join(args.results_dir, args.run_id, "checkpoints")
-args.log_dir = os.path.join(args.results_dir, args.run_id, "logs")
-args.overwrite_checkpoint_dir = False
+args.run_dir = os.path.join(args.results_dir, args.run_id)
+args.checkpoints_dir = os.path.join(args.run_dir, "checkpoints")
+args.log_dir = os.path.join(args.run_dir, "logs")
+args.overwrite_run_results = True
 
 args.run_download_dataset = False
 args.run_generator_pretraining = True
@@ -55,7 +57,7 @@ args.generator_adversarial_batch_size = 64
 args.discriminator_adversarial_learning_rate = 1e-4
 args.discriminator_adversarial_grad_clipvalue = 5.
 args.discriminator_adversarial_logging_steps = 1
-args.discriminator_adversarial_batch_size = 64
+args.discriminator_adversarial_batch_size = 22
 args.discriminator_adversarial_neg_sample_weight = 0.5
 args.adversarial_rounds = 10000
 args.adversarial_validate_rounds = 50
@@ -69,6 +71,9 @@ init_logging(args.log_dir)
 
 personality_captions = PersonalityCaptions(args.data_dir)
 dataset_loader = DatasetLoader(personality_captions)
+
+if args.overwrite_run_results:
+    shutil.rmtree(args.run_dir, ignore_errors=True)
 
 if args.run_download_dataset:
     personality_captions.download()
