@@ -187,8 +187,7 @@ def pretrain_generator(args, dataset_loader):
             with val_summary_writer.as_default():
                 tf.summary.scalar("generator_pretrain_loss", tf.reduce_mean(losses), step=global_step)
         if global_step % args.generator_pretrain_checkpoint_steps == 0:
-            checkpoint_manager.save(["encoder", "generator", "generator_pretrain_params"],
-                                    checkpoint_number=global_step)
+            checkpoint_manager.save(["encoder", "generator", "generator_pretrain_params"])
 
     logger.info("***** Pretraining Generator - Ended *****")
 
@@ -257,8 +256,7 @@ def pretrain_discriminator(args, dataset_loader):
             with val_summary_writer.as_default():
                 tf.summary.scalar("discriminator_pretrain_loss", tf.reduce_mean(losses), step=global_step)
         if global_step % args.discriminator_pretrain_checkpoint_steps == 0:
-            checkpoint_manager.save(["discriminator", "discriminator_pretrain_params"],
-                                    checkpoint_number=global_step)
+            checkpoint_manager.save(["discriminator", "discriminator_pretrain_params"])
 
     logger.info("***** Pretraining Discriminator - Ended *****")
 
@@ -349,8 +347,7 @@ def adversarially_train_generator_and_discriminator(args, dataset_loader):
         rollout.update_weights(generator)
 
         if round_ % args.adversarial_checkpoint_rounds:
-            checkpoint_manager.save(["encoder", "generator", "discriminator", "adversarial_params"],
-                                    checkpoint_number=round_)
+            checkpoint_manager.save(["encoder", "generator", "discriminator", "adversarial_params"])
 
         # TODO: Calculate validation loss initially?
         if round_ % args.adversarial_validate_rounds == 0:
