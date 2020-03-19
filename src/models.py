@@ -61,6 +61,8 @@ class Generator(tf.keras.Model):
         self.dense_lstm_output = tf.keras.layers.Dense(units=self.vocab_size, activation="softmax")
         self.dropout = tf.keras.layers.Dropout(rate=0.5)
 
+        self.forward(tf.ones((1, 10, 10, 2048)), tf.ones((1, 10)))  # initialize weights
+
     def call(self, encoder_output, sequences_t, memory_state, carry_state, training=False):
         embeddings = self.embedding(sequences_t)
         attention_weighted_encoding, attention_alpha = self.attention(encoder_output, carry_state)
@@ -71,7 +73,7 @@ class Generator(tf.keras.Model):
         prediction = self.dense_lstm_output(self.dropout(carry_state, training=training))
         return prediction, attention_alpha, memory_state, carry_state
 
-    def train_mle_forward(self, encoder_output, sequences, teacher_forcing_rate=1, training=False):
+    def forward(self, encoder_output, sequences, teacher_forcing_rate=1, training=False):
         predictions, attention_alphas = [], []
         encoder_output = self._reshape_encoder_output(encoder_output)
         memory_state, carry_state = self.init_lstm_states(encoder_output)
@@ -87,7 +89,7 @@ class Generator(tf.keras.Model):
         return tf.stack(predictions, axis=1), tf.stack(attention_alphas, axis=1)
 
     def generate_caption(self, encoder_output, mode, start_id, end_id, max_len=20):
-        # TODO: Implement beam_search, MCTS caption generation
+        # TODO: Implement beam_search
         if mode not in ["stochastic", "deterministic", "beam_search", "mcts"]:
             raise ValueError(f"Caption generation mode {mode} is not valid")
         batch_size = encoder_output.shape[0]
@@ -108,7 +110,29 @@ class Generator(tf.keras.Model):
             keep_generating_mask = tf.cast(tokens != end_id, dtype=tf.int64) * keep_generating_mask
         return tf.stack(sequences, axis=1)
 
+    def sample(self, encoder_output, initial_values, sequence_length, n_samples):
+        encoder_output = self._reshape_encoder_output(encoder_output)
+        init_sequence_length = initial_values.shape[1]
+        init_sequences = [tf.argmax(initial_values[:, 0, :], axis=1)]
+        init_memory_state, init_carry_state = self.init_lstm_states(encoder_output)
+        for t in range(1, init_sequence_length):
+            prediction, _, init_memory_state, init_carry_state = self.call(encoder_output, init_sequences[t - 1],
+                                                                           init_memory_state, init_carry_state)
+            init_sequences.append(tf.argmax(prediction, axis=1))
+
+        samples = []
+        for n in range(n_samples):
+            sequences = [tf.identity(s) for s in init_sequences]
+            memory_state, carry_state = tf.identity(init_memory_state), tf.identity(init_carry_state)
+            for t in range(init_sequence_length, sequence_length):
+                prediction, _, memory_state, carry_state = self.call(encoder_output, sequences[t - 1],
+                                                                     memory_state, carry_state)
+                sequences.append(tfp.distributions.Categorical(probs=prediction, dtype=tf.int64).sample())
+            samples.append(tf.stack(sequences, axis=1))
+        return samples
+
     def init_lstm_states(self, encoder_output):
+        # TODO: add random vector z here?
         mean_encoder_output = tf.reduce_mean(encoder_output, axis=1)
         memory_state = self.dense_init_memory_state(mean_encoder_output)
         carry_state = self.dense_init_carry_state(mean_encoder_output)
@@ -130,6 +154,8 @@ class Discriminator(tf.keras.Model):
         self.dense1 = tf.keras.layers.Dense(units=1024, activation="relu")
         self.dropout = tf.keras.layers.Dropout(rate=0.2)
         self.dense2 = tf.keras.layers.Dense(units=1, activation="sigmoid")
+
+        self.call(tf.ones((1, 10, 10, 2048)), tf.ones((1, 10)))  # initialize weights
 
     def call(self, encoder_output, sequences, training=False):
         encoder_output = self.pooling(encoder_output)

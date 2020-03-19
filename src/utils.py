@@ -1,7 +1,6 @@
 import logging
 import os
 import random
-import shutil
 
 import numpy as np
 import tensorflow as tf
@@ -29,11 +28,9 @@ def init_logging(log_dir):
 
 
 class MultiCheckpointManager:
-    def __init__(self, checkpoints_dir, overwrite_checkpoint_dir, config):
+    def __init__(self, checkpoints_dir, config):
         self.checkpoints = {}
         self.checkpoint_managers = {}
-        if overwrite_checkpoint_dir:
-            shutil.rmtree(checkpoints_dir)
         for checkpoint_name, objects_to_save in config.items():
             checkpoint = tf.train.Checkpoint(**objects_to_save)
             manager = tf.train.CheckpointManager(checkpoint, os.path.join(checkpoints_dir, checkpoint_name),
