@@ -1,5 +1,6 @@
 import logging
 import os
+from collections import defaultdict
 
 import tensorflow as tf
 from tqdm import tqdm
@@ -177,15 +178,15 @@ def pretrain_generator(args, dataset_loader):
         loss = generator_train_batch_mle(train_batch, encoder, generator, loss_fn, optimizer,
                                          args.generator_pretrain_dsa_lambda)
         if global_step % args.generator_pretrain_logging_steps == 0:
-            with train_summary_writer.as_default():
-                tf.summary.scalar("generator_pretrain_loss", loss, step=global_step)
+            with train_summary_writer.as_default(), tf.name_scope("generator_pretraining"):
+                tf.summary.scalar("crossentropy_loss", loss, step=global_step)
         # TODO: Calculate validation loss initially?
         if global_step % args.generator_pretrain_validate_steps == 0:
             logger.info("-- Calculating validation loss")
             losses = [generator_loss_mle(val_batch, encoder, generator, loss_fn, args.generator_pretrain_dsa_lambda)
                       for val_batch in val_dataset]
-            with val_summary_writer.as_default():
-                tf.summary.scalar("generator_pretrain_loss", tf.reduce_mean(losses), step=global_step)
+            with val_summary_writer.as_default(), tf.name_scope("generator_pretraining"):
+                tf.summary.scalar("crossentropy_loss", tf.reduce_mean(losses), step=global_step)
         if global_step % args.generator_pretrain_checkpoint_steps == 0:
             checkpoint_manager.save(["encoder", "generator", "generator_pretrain_params"])
 
@@ -242,8 +243,8 @@ def pretrain_discriminator(args, dataset_loader):
         loss = discriminator_train_batch_mle(true_batch, fake_batch, shuffled_batch, encoder, discriminator, loss_fn,
                                              optimizer)
         if global_step % args.discriminator_pretrain_logging_steps == 0:
-            with train_summary_writer.as_default():
-                tf.summary.scalar("discriminator_pretrain_loss", loss, step=global_step)
+            with train_summary_writer.as_default(), tf.name_scope("discriminator_pretraining"):
+                tf.summary.scalar("crossentropy_loss", loss, step=global_step)
         # TODO: Calculate validation loss initially?
         if global_step % args.discriminator_pretrain_validate_steps == 0:
             logger.info("-- Calculating validation loss")
@@ -253,8 +254,8 @@ def pretrain_discriminator(args, dataset_loader):
                 val_fake_batch = generate_fake_captions(val_fake_batch, encoder, generator, dataset_loader.tokenizer)
                 losses.append(discriminator_loss_mle((val_true_batch, val_fake_batch, val_shuffled_batch),
                                                      encoder, discriminator, loss_fn))
-            with val_summary_writer.as_default():
-                tf.summary.scalar("discriminator_pretrain_loss", tf.reduce_mean(losses), step=global_step)
+            with val_summary_writer.as_default(), tf.name_scope("discriminator_pretraining"):
+                tf.summary.scalar("crossentropy_loss", tf.reduce_mean(losses), step=global_step)
         if global_step % args.discriminator_pretrain_checkpoint_steps == 0:
             checkpoint_manager.save(["discriminator", "discriminator_pretrain_params"])
 
@@ -280,7 +281,8 @@ def adversarially_train_generator_and_discriminator(args, dataset_loader):
     rollout = MonteCarloRollout(generator_mc, args.adversarial_rollout_n, args.adversarial_rollout_update_rate)
     rollout.update_weights(generator)
 
-    generator_loss_fn = PolicyGradientLoss()
+    generator_loss_fn_pg = PolicyGradientLoss()
+    generator_loss_fn_mle = tf.keras.losses.SparseCategoricalCrossentropy()
     discriminator_loss_fn = tf.keras.losses.BinaryCrossentropy()
     generator_optimizer = tf.keras.optimizers.Adam(learning_rate=args.generator_adversarial_learning_rate,
                                                    clipvalue=args.generator_adversarial_grad_clipvalue)
@@ -326,11 +328,14 @@ def adversarially_train_generator_and_discriminator(args, dataset_loader):
         for _ in tqdm(range(args.adversarial_g_steps), desc="Training Generator", unit="batch"):
             generator_step.assign_add(1)
             train_batch = next(generator_train_dataset)
-            loss = generator_train_batch_pg(train_batch, encoder, generator, discriminator,
-                                            generator_optimizer, generator_loss_fn, rollout)
+            pg_loss = generator_train_batch_pg(train_batch, encoder, generator, discriminator,
+                                               generator_optimizer, generator_loss_fn_pg, rollout)
             if generator_step % args.generator_adversarial_logging_steps == 0:
-                with train_summary_writer.as_default():
-                    tf.summary.scalar("generator_adversarial_loss", loss, step=generator_step)
+                mle_loss = generator_loss_mle(train_batch, encoder, generator, generator_loss_fn_mle,
+                                              args.generator_adversarial_dsa_lambda)
+                with train_summary_writer.as_default(), tf.name_scope("generator_adversarial_training"):
+                    tf.summary.scalar("policy_gradient_loss", pg_loss, step=generator_step)
+                    tf.summary.scalar("crossentropy_loss", mle_loss, step=generator_step)
 
         for _ in tqdm(range(args.adversarial_d_steps), desc="Training Discriminator", unit="batch"):
             discriminator_step.assign_add(1)
@@ -341,8 +346,8 @@ def adversarially_train_generator_and_discriminator(args, dataset_loader):
             loss = discriminator_train_batch_mle(true_batch, fake_batch, shuffled_batch, encoder, discriminator,
                                                  discriminator_loss_fn, discriminator_optimizer)
             if discriminator_step % args.discriminator_adversarial_logging_steps == 0:
-                with train_summary_writer.as_default():
-                    tf.summary.scalar("discriminator_adversarial_loss", loss, step=discriminator_step)
+                with train_summary_writer.as_default(), tf.name_scope("discriminator_adversarial_training"):
+                    tf.summary.scalar("crossentropy_loss", loss, step=discriminator_step)
 
         rollout.update_weights(generator)
 
@@ -352,9 +357,16 @@ def adversarially_train_generator_and_discriminator(args, dataset_loader):
         # TODO: Calculate validation loss initially?
         if round_ % args.adversarial_validate_rounds == 0:
             logger.info("-- Calculating generator validation loss")
-            generator_losses = [
-                generator_loss_pg(val_batch, encoder, generator, discriminator, generator_loss_fn, rollout)
-                for val_batch in generator_val_dataset]
+            generator_losses = defaultdict(list)
+            for val_batch in generator_val_dataset:
+                generator_losses["pg"].append(generator_loss_pg(val_batch, encoder, generator, discriminator,
+                                                                generator_loss_fn_pg, rollout))
+                generator_losses["mle"].append(generator_loss_mle(val_batch, encoder, generator, generator_loss_fn_mle,
+                                                                  args.generator_adversarial_dsa_lambda))
+            with val_summary_writer.as_default(), tf.name_scope("generator_adversarial_training"):
+                tf.summary.scalar("policy_gradient_loss", tf.reduce_mean(generator_losses["pg"]), step=generator_step)
+                tf.summary.scalar("crossentropy_loss", tf.reduce_mean(generator_losses["mle"]), step=generator_step)
+
             logger.info("-- Calculating discriminator validation loss")
             discriminator_losses = []
             for val_true_batch, val_fake_batch, val_shuffled_batch in zip(discriminator_val_dataset["true"],
@@ -363,9 +375,7 @@ def adversarially_train_generator_and_discriminator(args, dataset_loader):
                 val_fake_batch = generate_fake_captions(val_fake_batch, encoder, generator, dataset_loader.tokenizer)
                 discriminator_losses.append(discriminator_loss_mle((val_true_batch, val_fake_batch, val_shuffled_batch),
                                                                    encoder, discriminator, discriminator_loss_fn))
-            with val_summary_writer.as_default():
-                tf.summary.scalar("generator_adversarial_loss", tf.reduce_mean(generator_losses), step=generator_step)
-                tf.summary.scalar("discriminator_adversarial_loss", tf.reduce_mean(discriminator_losses),
-                                  step=discriminator_step)
+            with val_summary_writer.as_default(), tf.name_scope("discriminator_adversarial_training"):
+                tf.summary.scalar("crossentropy_loss", tf.reduce_mean(discriminator_losses), step=discriminator_step)
 
     logger.info("***** Adversarially training Generator & Discriminator - Ended *****")
