@@ -48,10 +48,10 @@ class MonteCarloRollout:
 def generator_train_batch_pg(batch, encoder, generator, discriminator, optimizer, loss_fn, rollout):
     with tf.GradientTape(watch_accessed_variables=False) as tape:
         tape.watch(generator.trainable_variables)
-        # TODO: calling another tf.function causes warnings. how to reuse generator_loss_pg?
         images, captions = batch
         encoder_output = encoder(images)
-        predictions, _ = generator.forward(encoder_output, captions)
+        # TODO: teacher_forcing_rate = 0 here?
+        predictions, _ = generator.forward(encoder_output, captions, training=True)
         rewards = rollout.calculate_rewards(encoder_output, predictions, discriminator)
         loss = loss_fn(captions, predictions, rewards)
         gradients = tape.gradient(loss, generator.trainable_variables)
@@ -73,10 +73,9 @@ def generator_loss_pg(batch, encoder, generator, discriminator, loss_fn, rollout
 def generator_train_batch_mle(batch, encoder, generator, loss_fn, optimizer, dsa_lambda):
     with tf.GradientTape(watch_accessed_variables=False) as tape:
         tape.watch(generator.trainable_variables)
-        # TODO: calling another tf.function causes warnings. how to reuse generator_loss_mle?
         images, captions = batch
         encoder_output = encoder(images)
-        predictions, attention_alphas = generator.forward(encoder_output, captions)
+        predictions, attention_alphas = generator.forward(encoder_output, captions, training=True)
         loss = loss_fn(captions, predictions)
         # TODO: Include doubly stochastic attention loss?
         # loss += dsa_lambda * tf.reduce_mean(1. - tf.reduce_sum(attention_alphas, axis=1) ** 2)
@@ -101,7 +100,6 @@ def discriminator_train_batch_mle(true_batch, fake_batch, shuffled_batch, encode
     with tf.GradientTape(watch_accessed_variables=False) as tape:
         tape.watch(discriminator.trainable_variables)
         batches = (true_batch, fake_batch, shuffled_batch)
-        # TODO: calling another tf.function causes warnings. how to reuse discriminator_loss_mle?
         images = tf.concat([b[0] for b in batches], axis=0)
         labels = tf.concat([b[2] for b in batches], axis=0)
         sample_weight = tf.concat([b[3] for b in batches], axis=0)
@@ -110,7 +108,7 @@ def discriminator_train_batch_mle(true_batch, fake_batch, shuffled_batch, encode
         captions = [tf.pad(c, paddings=tf.constant([[0, 0], [0, max_caption_length - c.shape[1]]])) for c in captions]
         captions = tf.concat(captions, axis=0)
         encoder_output = encoder(images)
-        predictions = discriminator(encoder_output, captions)
+        predictions = discriminator(encoder_output, captions, training=True)
         loss = loss_fn(labels, predictions, sample_weight=sample_weight)
         gradients = tape.gradient(loss, discriminator.trainable_variables)
     optimizer.apply_gradients(zip(gradients, discriminator.trainable_variables))
