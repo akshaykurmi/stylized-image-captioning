@@ -90,7 +90,7 @@ class Generator(tf.keras.Model):
 
     def generate_caption(self, encoder_output, mode, start_id, end_id, max_len=20):
         # TODO: Implement beam_search
-        if mode not in ["stochastic", "deterministic", "beam_search", "mcts"]:
+        if mode not in ["stochastic", "deterministic", "beam_search"]:
             raise ValueError(f"Caption generation mode {mode} is not valid")
         batch_size = encoder_output.shape[0]
         sequences = [tf.ones(batch_size, dtype=tf.int64) * start_id]
