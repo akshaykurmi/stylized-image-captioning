@@ -7,8 +7,6 @@ class Encoder(tf.keras.Model):
     def __init__(self):
         super().__init__()
         self.resnet = tf.keras.applications.resnet_v2.ResNet101V2(include_top=False, weights="imagenet")
-        # TODO: average pooling to resize to 14 x 14?
-        # TODO: fine tune last few convolution blocks?
         for layer in self.resnet.layers:
             layer.trainable = False
 

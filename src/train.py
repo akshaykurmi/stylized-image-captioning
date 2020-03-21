@@ -29,8 +29,14 @@ class MonteCarloRollout:
         self.n_rollouts = n_rollouts
 
     def update_weights(self, generator):
-        # TODO: how to incorporate update rate here?
-        self.generator.set_weights(generator.get_weights())
+        updated_weights = []
+        variable_names = [v.name for v in generator.variables]
+        for name, self_w, other_w in zip(variable_names, self.generator.get_weights(), generator.get_weights()):
+            if "embedding" in name:
+                updated_weights.append(other_w)
+            else:
+                updated_weights.append(self.update_rate * other_w + (1 - self.update_rate) * self_w)
+        self.generator.set_weights(updated_weights)
 
     def calculate_rewards(self, encoder_output, captions, discriminator, training):
         sequence_length = captions.shape[1]
