@@ -45,6 +45,26 @@ class MonteCarloRollout:
         return tf.squeeze(tf.stack(rewards, axis=1))
 
 
+class InverseSigmoidDecay(tf.optimizers.schedules.LearningRateSchedule):
+    def __init__(self, initial_rate, k, name="inverse_sigmoid_decay"):
+        super().__init__()
+        self.initial_rate = initial_rate
+        self.k = k
+        self.name = name
+
+    def __call__(self, step):
+        with tf.name_scope(self.name):
+            decay = self.k / (self.k + tf.math.exp(step / self.k))
+            return self.initial_rate * decay
+
+    def get_config(self):
+        return {
+            "initial_rate": self.initial_rate,
+            "k": self.k,
+            "name": self.name
+        }
+
+
 @tf.function
 def generator_train_batch_pg(batch, encoder, generator, discriminator, optimizer, loss_fn, rollout, tokenizer):
     with tf.GradientTape(watch_accessed_variables=False) as tape:
@@ -78,13 +98,13 @@ def generator_loss_pg(batch, encoder, generator, discriminator, loss_fn, rollout
 
 
 @tf.function
-def generator_train_batch_mle(batch, encoder, generator, loss_fn, optimizer, dsa_lambda):
+def generator_train_batch_mle(batch, encoder, generator, loss_fn, optimizer, dsa_lambda, teacher_forcing_rate):
     with tf.GradientTape(watch_accessed_variables=False) as tape:
         tape.watch(generator.trainable_variables)
         images, captions = batch
         encoder_output = encoder(images)
         predictions, attention_alphas = generator.forward(encoder_output, captions, mode="stochastic",
-                                                          teacher_forcing_rate=1, training=True)
+                                                          teacher_forcing_rate=teacher_forcing_rate, training=True)
         loss = loss_fn(captions, predictions)
         loss += dsa_lambda * tf.reduce_mean(tf.reduce_sum((1 - tf.reduce_sum(attention_alphas, axis=1)) ** 2, axis=1))
         gradients = tape.gradient(loss, generator.trainable_variables)
@@ -97,7 +117,7 @@ def generator_loss_mle(batch, encoder, generator, loss_fn, dsa_lambda):
     images, captions = batch
     encoder_output = encoder(images)
     predictions, attention_alphas = generator.forward(encoder_output, captions, mode="stochastic",
-                                                      teacher_forcing_rate=1, training=False)
+                                                      teacher_forcing_rate=0, training=False)
     loss = loss_fn(captions, predictions)
     loss += dsa_lambda * tf.reduce_mean(tf.reduce_sum((1 - tf.reduce_sum(attention_alphas, axis=1)) ** 2, axis=1))
     return loss
@@ -163,6 +183,8 @@ def pretrain_generator(args, dataset_loader):
     loss_fn = tf.keras.losses.SparseCategoricalCrossentropy()
     optimizer = tf.keras.optimizers.Adam(learning_rate=args.generator_pretrain_learning_rate,
                                          clipvalue=args.generator_pretrain_grad_clipvalue)
+    teacher_forcing_schedule = InverseSigmoidDecay(args.generator_pretrain_scheduled_sampling_initial_rate,
+                                                   args.generator_pretrain_scheduled_sampling_k)
 
     train_summary_writer = tf.summary.create_file_writer(os.path.join(args.log_dir, "train"))
     val_summary_writer = tf.summary.create_file_writer(os.path.join(args.log_dir, "val"))
@@ -183,11 +205,13 @@ def pretrain_generator(args, dataset_loader):
 
     for train_batch in tqdm(train_dataset, desc="Batch", unit="batch"):
         global_step.assign_add(1)
+        teacher_forcing_rate = teacher_forcing_schedule(global_step)
         loss = generator_train_batch_mle(train_batch, encoder, generator, loss_fn, optimizer,
-                                         args.generator_pretrain_dsa_lambda)
+                                         args.generator_pretrain_dsa_lambda, teacher_forcing_rate)
         if global_step % args.generator_pretrain_logging_steps == 0:
             with train_summary_writer.as_default(), tf.name_scope("generator_pretraining"):
                 tf.summary.scalar("crossentropy_loss", loss, step=global_step)
+                tf.summary.scalar("teacher_forcing_rate", teacher_forcing_rate, step=global_step)
         # TODO: Calculate validation loss initially?
         if global_step % args.generator_pretrain_validate_steps == 0:
             logger.info("-- Calculating validation loss")

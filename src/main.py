@@ -32,6 +32,8 @@ args.generator_lstm_dropout = 0.2
 args.discriminator_embedding_units = 512
 args.discriminator_lstm_units = 512
 
+args.generator_pretrain_scheduled_sampling_initial_rate = 1
+args.generator_pretrain_scheduled_sampling_k = 3500
 args.generator_pretrain_learning_rate = 1e-4
 args.generator_pretrain_grad_clipvalue = 5.
 args.generator_pretrain_dsa_lambda = 0.9
