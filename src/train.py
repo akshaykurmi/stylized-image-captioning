@@ -66,14 +66,15 @@ class InverseSigmoidDecay(tf.optimizers.schedules.LearningRateSchedule):
 
 
 @tf.function
-def generator_train_batch_pg(batch, encoder, generator, discriminator, optimizer, loss_fn, rollout, tokenizer):
+def generator_train_batch_pg(batch, encoder, generator, discriminator, optimizer, loss_fn, rollout, tokenizer,
+                             max_seq_len):
     with tf.GradientTape(watch_accessed_variables=False) as tape:
         tape.watch(generator.trainable_variables)
         images = batch[0]
         batch_size = images.shape[0]
         encoder_output = encoder(images)
         initial_sequence = tf.ones((batch_size, 1), dtype=tf.int64) * tokenizer.start_id
-        captions, probabilities = generator.sample(encoder_output, initial_sequence, sequence_length=20,
+        captions, probabilities = generator.sample(encoder_output, initial_sequence, sequence_length=max_seq_len,
                                                    mode="stochastic", n_samples=1, training=True)
         captions, probabilities = captions[0], probabilities[0]
         rewards = rollout.calculate_rewards(encoder_output, captions, discriminator, training=True)
@@ -84,12 +85,12 @@ def generator_train_batch_pg(batch, encoder, generator, discriminator, optimizer
 
 
 @tf.function
-def generator_loss_pg(batch, encoder, generator, discriminator, loss_fn, rollout, tokenizer):
+def generator_loss_pg(batch, encoder, generator, discriminator, loss_fn, rollout, tokenizer, max_seq_len):
     images = batch[0]
     batch_size = images.shape[0]
     encoder_output = encoder(images)
     initial_sequence = tf.ones((batch_size, 1), dtype=tf.int64) * tokenizer.start_id
-    captions, probabilities = generator.sample(encoder_output, initial_sequence, sequence_length=20,
+    captions, probabilities = generator.sample(encoder_output, initial_sequence, sequence_length=max_seq_len,
                                                mode="stochastic", n_samples=1, training=False)
     captions, probabilities = captions[0], probabilities[0]
     rewards = rollout.calculate_rewards(encoder_output, captions, discriminator, training=False)
@@ -159,12 +160,12 @@ def discriminator_loss_mle(batches, encoder, discriminator, loss_fn):
 
 
 @tf.function
-def generate_fake_captions(true_batch, encoder, generator, tokenizer):
+def generate_fake_captions(true_batch, encoder, generator, tokenizer, max_seq_len):
     images, labels, sample_weights = true_batch[0], true_batch[2], true_batch[3]
     batch_size = images.shape[0]
     encoder_output = encoder(images)
     initial_sequence = tf.ones((batch_size, 1), dtype=tf.int64) * tokenizer.start_id
-    captions = generator.sample(encoder_output, initial_sequence, sequence_length=20,
+    captions = generator.sample(encoder_output, initial_sequence, sequence_length=max_seq_len,
                                 mode="stochastic", n_samples=1, training=False)[0][0]
     return images, captions, labels, sample_weights
 
@@ -271,7 +272,7 @@ def pretrain_discriminator(args, dataset_loader):
     for true_batch, fake_batch, shuffled_batch in tqdm(zip(train_dataset["true"], train_dataset["fake"],
                                                            train_dataset["shuffled"]), desc="Batch", unit="batch"):
         global_step.assign_add(1)
-        fake_batch = generate_fake_captions(fake_batch, encoder, generator, dataset_loader.tokenizer)
+        fake_batch = generate_fake_captions(fake_batch, encoder, generator, dataset_loader.tokenizer, args.max_seq_len)
         loss = discriminator_train_batch_mle(true_batch, fake_batch, shuffled_batch, encoder, discriminator, loss_fn,
                                              optimizer)
         if global_step % args.discriminator_pretrain_logging_steps == 0:
@@ -283,7 +284,8 @@ def pretrain_discriminator(args, dataset_loader):
             losses = []
             for val_true_batch, val_fake_batch, val_shuffled_batch in zip(val_dataset["true"], val_dataset["fake"],
                                                                           val_dataset["shuffled"]):
-                val_fake_batch = generate_fake_captions(val_fake_batch, encoder, generator, dataset_loader.tokenizer)
+                val_fake_batch = generate_fake_captions(val_fake_batch, encoder, generator, dataset_loader.tokenizer,
+                                                        args.max_seq_len)
                 losses.append(discriminator_loss_mle((val_true_batch, val_fake_batch, val_shuffled_batch),
                                                      encoder, discriminator, loss_fn))
             with val_summary_writer.as_default(), tf.name_scope("discriminator_pretraining"):
@@ -361,7 +363,8 @@ def adversarially_train_generator_and_discriminator(args, dataset_loader):
             generator_step.assign_add(1)
             train_batch = next(generator_train_dataset)
             pg_loss = generator_train_batch_pg(train_batch, encoder, generator, discriminator, generator_optimizer,
-                                               generator_loss_fn_pg, rollout, dataset_loader.tokenizer)
+                                               generator_loss_fn_pg, rollout, dataset_loader.tokenizer,
+                                               args.max_seq_len)
             if generator_step % args.generator_adversarial_logging_steps == 0:
                 mle_loss = generator_loss_mle(train_batch, encoder, generator, generator_loss_fn_mle,
                                               args.generator_adversarial_dsa_lambda)
@@ -374,7 +377,8 @@ def adversarially_train_generator_and_discriminator(args, dataset_loader):
             true_batch = next(discriminator_train_dataset["true"])
             fake_batch = next(discriminator_train_dataset["fake"])
             shuffled_batch = next(discriminator_train_dataset["shuffled"])
-            fake_batch = generate_fake_captions(fake_batch, encoder, generator, dataset_loader.tokenizer)
+            fake_batch = generate_fake_captions(fake_batch, encoder, generator, dataset_loader.tokenizer,
+                                                args.max_seq_len)
             loss = discriminator_train_batch_mle(true_batch, fake_batch, shuffled_batch, encoder, discriminator,
                                                  discriminator_loss_fn, discriminator_optimizer)
             if discriminator_step % args.discriminator_adversarial_logging_steps == 0:
@@ -393,7 +397,7 @@ def adversarially_train_generator_and_discriminator(args, dataset_loader):
             for val_batch in generator_val_dataset:
                 generator_losses["pg"].append(
                     generator_loss_pg(val_batch, encoder, generator, discriminator, generator_loss_fn_pg, rollout,
-                                      dataset_loader.tokenizer)
+                                      dataset_loader.tokenizer, args.max_seq_len)
                 )
                 generator_losses["mle"].append(generator_loss_mle(val_batch, encoder, generator, generator_loss_fn_mle,
                                                                   args.generator_adversarial_dsa_lambda))
@@ -406,7 +410,8 @@ def adversarially_train_generator_and_discriminator(args, dataset_loader):
             for val_true_batch, val_fake_batch, val_shuffled_batch in zip(discriminator_val_dataset["true"],
                                                                           discriminator_val_dataset["fake"],
                                                                           discriminator_val_dataset["shuffled"]):
-                val_fake_batch = generate_fake_captions(val_fake_batch, encoder, generator, dataset_loader.tokenizer)
+                val_fake_batch = generate_fake_captions(val_fake_batch, encoder, generator, dataset_loader.tokenizer,
+                                                        args.max_seq_len)
                 discriminator_losses.append(discriminator_loss_mle((val_true_batch, val_fake_batch, val_shuffled_batch),
                                                                    encoder, discriminator, discriminator_loss_fn))
             with val_summary_writer.as_default(), tf.name_scope("discriminator_adversarial_training"):

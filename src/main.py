@@ -23,7 +23,9 @@ args.run_generator_pretraining = True
 args.run_discriminator_pretraining = False
 args.run_adversarial_training = False
 args.run_evaluation = False
+
 args.seed = 42
+args.max_seq_len = 20
 
 args.generator_embedding_units = 512
 args.generator_attention_units = 512
@@ -73,7 +75,7 @@ args.adversarial_rollout_update_rate = 1
 init_logging(args.log_dir)
 
 personality_captions = PersonalityCaptions(args.data_dir)
-dataset_loader = DatasetLoader(personality_captions)
+dataset_loader = DatasetLoader(personality_captions, args.max_seq_len)
 
 if args.overwrite_run_results:
     shutil.rmtree(args.run_dir, ignore_errors=True)

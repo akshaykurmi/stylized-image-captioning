@@ -69,15 +69,16 @@ class PersonalityCaptions:
 
 
 class DatasetLoader:
-    def __init__(self, dataset):
+    def __init__(self, dataset, max_seq_len):
         self.dataset = dataset
+        self.max_seq_len = max_seq_len
         self.tokenizer = Tokenizer()
         self.tokenizer.fit_on_texts([d["caption"] for d in self.dataset.load("train")])
 
     def load_generator_dataset(self, split, batch_size, repeat):
         data = self.dataset.load(split)
         for d in data:
-            d.update({"caption": self.tokenizer.texts_to_sequences([d["caption"]])[0]})
+            d.update({"caption": self.tokenizer.texts_to_sequences([d["caption"]], self.max_seq_len)[0]})
         random.shuffle(data)
         image_paths = tf.convert_to_tensor([d["image_path"] for d in data])
         sequences = tf.ragged.constant([d["caption"] for d in data])
@@ -93,7 +94,7 @@ class DatasetLoader:
         random.shuffle(data)
         for d in data:
             d.update({
-                "caption": self.tokenizer.texts_to_sequences([d["caption"]])[0],
+                "caption": self.tokenizer.texts_to_sequences([d["caption"]], self.max_seq_len)[0],
                 "discriminator_label": label,
                 "sample_weight": sample_weight
             })

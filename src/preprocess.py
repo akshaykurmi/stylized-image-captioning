@@ -45,13 +45,16 @@ class Tokenizer:
                 self.token_2_index[token] = index
                 self.index_2_token[index] = token
 
-    def texts_to_sequences(self, texts):
+    def texts_to_sequences(self, texts, max_len=None):
         texts = [self.preprocess(t) for t in texts]
-        return list(map(
+        texts = list(map(
             lambda text: list(map(
                 lambda token: self.token_2_index.get(token, self.token_2_index[self.unk]),
                 text)),
             texts))
+        if max_len is not None:
+            texts = list(map(lambda text: text[:max_len], texts))
+        return texts
 
     def sequences_to_texts(self, sequences):
         return list(map(
