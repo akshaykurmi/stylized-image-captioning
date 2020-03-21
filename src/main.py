@@ -34,7 +34,7 @@ args.discriminator_lstm_units = 512
 
 args.generator_pretrain_learning_rate = 1e-4
 args.generator_pretrain_grad_clipvalue = 5.
-args.generator_pretrain_dsa_lambda = 1.
+args.generator_pretrain_dsa_lambda = 0.9
 args.generator_pretrain_batch_size = 64
 args.generator_pretrain_epochs = 20
 args.generator_pretrain_logging_steps = 1
@@ -54,7 +54,7 @@ args.generator_adversarial_learning_rate = 1e-4
 args.generator_adversarial_grad_clipvalue = 5.
 args.generator_adversarial_logging_steps = 1
 args.generator_adversarial_batch_size = 64
-args.generator_adversarial_dsa_lambda = 1.
+args.generator_adversarial_dsa_lambda = 0.9
 args.discriminator_adversarial_learning_rate = 1e-4
 args.discriminator_adversarial_grad_clipvalue = 5.
 args.discriminator_adversarial_logging_steps = 1

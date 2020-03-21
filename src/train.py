@@ -86,8 +86,7 @@ def generator_train_batch_mle(batch, encoder, generator, loss_fn, optimizer, dsa
         predictions, attention_alphas = generator.forward(encoder_output, captions, mode="stochastic",
                                                           teacher_forcing_rate=1, training=True)
         loss = loss_fn(captions, predictions)
-        # TODO: Include doubly stochastic attention loss?
-        # loss += dsa_lambda * tf.reduce_mean(1. - tf.reduce_sum(attention_alphas, axis=1) ** 2)
+        loss += dsa_lambda * tf.reduce_mean(tf.reduce_sum((1 - tf.reduce_sum(attention_alphas, axis=1)) ** 2, axis=1))
         gradients = tape.gradient(loss, generator.trainable_variables)
     optimizer.apply_gradients(zip(gradients, generator.trainable_variables))
     return loss
@@ -100,8 +99,7 @@ def generator_loss_mle(batch, encoder, generator, loss_fn, dsa_lambda):
     predictions, attention_alphas = generator.forward(encoder_output, captions, mode="stochastic",
                                                       teacher_forcing_rate=1, training=False)
     loss = loss_fn(captions, predictions)
-    # TODO: Include doubly stochastic attention loss?
-    # loss += dsa_lambda * tf.reduce_mean(1. - tf.reduce_sum(attention_alphas, axis=1) ** 2)
+    loss += dsa_lambda * tf.reduce_mean(tf.reduce_sum((1 - tf.reduce_sum(attention_alphas, axis=1)) ** 2, axis=1))
     return loss
 
 
