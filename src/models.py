@@ -43,7 +43,7 @@ class EncoderGeneratorAttention(tf.keras.layers.Layer):
 
 
 class Generator(tf.keras.Model):
-    def __init__(self, vocab_size, embedding_units, attention_units, lstm_units, encoder_units, lstm_dropout):
+    def __init__(self, vocab_size, embedding_units, attention_units, lstm_units, encoder_units, lstm_dropout, z_units):
         super().__init__()
         self.vocab_size = vocab_size
         self.embedding_units = embedding_units
@@ -51,6 +51,9 @@ class Generator(tf.keras.Model):
         self.lstm_units = lstm_units
         self.encoder_units = encoder_units
         self.lstm_dropout = lstm_dropout
+        self.z_units = z_units
+
+        self.z_distribution = tfp.distributions.Normal(loc=tf.zeros(self.z_units), scale=tf.ones(self.z_units))
 
         self.attention = EncoderGeneratorAttention(units=self.attention_units)
         self.embedding = tf.keras.layers.Embedding(input_dim=vocab_size, output_dim=self.embedding_units)
@@ -73,14 +76,14 @@ class Generator(tf.keras.Model):
         prediction = self.dense_lstm_output(self.dropout(carry_state, training=training))
         return prediction, attention_alpha, memory_state, carry_state
 
-    def forward(self, encoder_output, sequences, mode, teacher_forcing_rate, training):
+    def forward(self, encoder_output, sequences, mode, teacher_forcing_rate, training, z=None):
         if mode not in ["stochastic", "deterministic"]:
             raise ValueError(f"Mode must be one of - stochastic, deterministic")
 
         sequence_length = sequences.shape[1]
         predictions, attention_alphas = [], []
         encoder_output = self._reshape_encoder_output(encoder_output)
-        memory_state, carry_state = self.init_lstm_states(encoder_output)
+        memory_state, carry_state = self.init_lstm_states(encoder_output, z)
         for t in range(sequence_length):
             sequences_t = sequences[:, t]
             if t > 0 and np.random.uniform() > teacher_forcing_rate:
@@ -95,7 +98,7 @@ class Generator(tf.keras.Model):
             attention_alphas.append(attention_alpha)
         return tf.stack(predictions, axis=1), tf.stack(attention_alphas, axis=1)
 
-    def sample(self, encoder_output, initial_sequence, sequence_length, mode, n_samples, training):
+    def sample(self, encoder_output, initial_sequence, sequence_length, mode, n_samples, training, z=None):
         if mode not in ["stochastic", "deterministic"]:
             raise ValueError(f"Mode must be one of - stochastic, deterministic")
 
@@ -105,7 +108,7 @@ class Generator(tf.keras.Model):
 
         initial_probabilities = []
         encoder_output = self._reshape_encoder_output(encoder_output)
-        initial_memory_state, initial_carry_state = self.init_lstm_states(encoder_output)
+        initial_memory_state, initial_carry_state = self.init_lstm_states(encoder_output, z)
         for t in range(initial_sequence_length):
             prediction, _, initial_memory_state, initial_carry_state = self.call(
                 encoder_output, initial_sequence[t], initial_memory_state, initial_carry_state, training=training
@@ -129,11 +132,13 @@ class Generator(tf.keras.Model):
             sample_probabilities.append(tf.stack(probabilities, axis=1))
         return samples, sample_probabilities
 
-    def init_lstm_states(self, encoder_output):
-        # TODO: add random vector z here?
+    def init_lstm_states(self, encoder_output, z):
+        if z is None:
+            z = self.z_distribution.sample(sample_shape=(encoder_output.shape[0],))
         mean_encoder_output = tf.reduce_mean(encoder_output, axis=1)
-        memory_state = self.dense_init_memory_state(mean_encoder_output)
-        carry_state = self.dense_init_carry_state(mean_encoder_output)
+        mean_encoder_output_with_z = tf.concat([mean_encoder_output, z], axis=1)
+        memory_state = self.dense_init_memory_state(mean_encoder_output_with_z)
+        carry_state = self.dense_init_carry_state(mean_encoder_output_with_z)
         return memory_state, carry_state
 
     @staticmethod

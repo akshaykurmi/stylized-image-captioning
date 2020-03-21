@@ -179,7 +179,8 @@ def pretrain_generator(args, dataset_loader):
     encoder = Encoder()
     generator = Generator(vocab_size=dataset_loader.tokenizer.vocab_size, lstm_units=args.generator_lstm_units,
                           embedding_units=args.generator_embedding_units, lstm_dropout=args.generator_lstm_dropout,
-                          attention_units=args.generator_attention_units, encoder_units=encoder.output_shape[-1])
+                          attention_units=args.generator_attention_units, encoder_units=encoder.output_shape[-1],
+                          z_units=args.generator_z_units)
 
     loss_fn = tf.keras.losses.SparseCategoricalCrossentropy()
     optimizer = tf.keras.optimizers.Adam(learning_rate=args.generator_pretrain_learning_rate,
@@ -235,7 +236,8 @@ def pretrain_discriminator(args, dataset_loader):
     encoder = Encoder()
     generator = Generator(vocab_size=dataset_loader.tokenizer.vocab_size, lstm_units=args.generator_lstm_units,
                           embedding_units=args.generator_embedding_units, lstm_dropout=args.generator_lstm_dropout,
-                          attention_units=args.generator_attention_units, encoder_units=encoder.output_shape[-1])
+                          attention_units=args.generator_attention_units, encoder_units=encoder.output_shape[-1],
+                          z_units=args.generator_z_units)
     discriminator = Discriminator(vocab_size=dataset_loader.tokenizer.vocab_size,
                                   embedding_units=args.discriminator_embedding_units,
                                   lstm_units=args.discriminator_lstm_units)
@@ -305,10 +307,12 @@ def adversarially_train_generator_and_discriminator(args, dataset_loader):
     encoder = Encoder()
     generator = Generator(vocab_size=dataset_loader.tokenizer.vocab_size, lstm_units=args.generator_lstm_units,
                           embedding_units=args.generator_embedding_units, lstm_dropout=args.generator_lstm_dropout,
-                          attention_units=args.generator_attention_units, encoder_units=encoder.output_shape[-1])
+                          attention_units=args.generator_attention_units, encoder_units=encoder.output_shape[-1],
+                          z_units=args.generator_z_units)
     generator_mc = Generator(vocab_size=dataset_loader.tokenizer.vocab_size, lstm_units=args.generator_lstm_units,
                              embedding_units=args.generator_embedding_units, lstm_dropout=args.generator_lstm_dropout,
-                             attention_units=args.generator_attention_units, encoder_units=encoder.output_shape[-1])
+                             attention_units=args.generator_attention_units, encoder_units=encoder.output_shape[-1],
+                             z_units=args.generator_z_units)
     discriminator = Discriminator(vocab_size=dataset_loader.tokenizer.vocab_size,
                                   embedding_units=args.discriminator_embedding_units,
                                   lstm_units=args.discriminator_lstm_units)

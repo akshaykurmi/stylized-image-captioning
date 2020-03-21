@@ -30,6 +30,7 @@ args.max_seq_len = 20
 args.generator_embedding_units = 512
 args.generator_attention_units = 512
 args.generator_lstm_units = 512
+args.generator_z_units = 256
 args.generator_lstm_dropout = 0.2
 args.discriminator_embedding_units = 512
 args.discriminator_lstm_units = 512
