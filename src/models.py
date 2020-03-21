@@ -61,9 +61,9 @@ class Generator(tf.keras.Model):
         self.dense_lstm_output = tf.keras.layers.Dense(units=self.vocab_size, activation="softmax")
         self.dropout = tf.keras.layers.Dropout(rate=0.5)
 
-        self.forward(tf.ones((1, 10, 10, 2048)), tf.ones((1, 10)))  # initialize weights
+        self.forward(tf.ones((1, 10, 10, 2048)), tf.ones((1, 10)), "deterministic", 1, False)  # initialize weights
 
-    def call(self, encoder_output, sequences_t, memory_state, carry_state, training=False):
+    def call(self, encoder_output, sequences_t, memory_state, carry_state, training):
         embeddings = self.embedding(sequences_t)
         attention_weighted_encoding, attention_alpha = self.attention(encoder_output, carry_state)
         beta_gate = self.dense_f_beta(carry_state)
@@ -73,14 +73,21 @@ class Generator(tf.keras.Model):
         prediction = self.dense_lstm_output(self.dropout(carry_state, training=training))
         return prediction, attention_alpha, memory_state, carry_state
 
-    def forward(self, encoder_output, sequences, teacher_forcing_rate=1, training=False):
+    def forward(self, encoder_output, sequences, mode, teacher_forcing_rate, training):
+        if mode not in ["stochastic", "deterministic"]:
+            raise ValueError(f"Mode must be one of - stochastic, deterministic")
+
+        sequence_length = sequences.shape[1]
         predictions, attention_alphas = [], []
         encoder_output = self._reshape_encoder_output(encoder_output)
         memory_state, carry_state = self.init_lstm_states(encoder_output)
-        for t in range(sequences.shape[-1]):
+        for t in range(sequence_length):
             sequences_t = sequences[:, t]
             if t > 0 and np.random.uniform() > teacher_forcing_rate:
-                sequences_t = tf.argmax(predictions[:, t - 1, :], axis=1)
+                if mode == "deterministic":
+                    sequences_t = tf.argmax(predictions[t - 1], axis=1)
+                else:
+                    sequences_t = tfp.distributions.Categorical(probs=predictions[t - 1]).sample()
             prediction, attention_alpha, memory_state, carry_state = self.call(encoder_output, sequences_t,
                                                                                memory_state, carry_state,
                                                                                training=training)
@@ -88,48 +95,39 @@ class Generator(tf.keras.Model):
             attention_alphas.append(attention_alpha)
         return tf.stack(predictions, axis=1), tf.stack(attention_alphas, axis=1)
 
-    def generate_caption(self, encoder_output, mode, start_id, end_id, max_len=20):
-        # TODO: Implement beam_search
-        if mode not in ["stochastic", "deterministic", "beam_search"]:
-            raise ValueError(f"Caption generation mode {mode} is not valid")
-        batch_size = encoder_output.shape[0]
-        sequences = [tf.ones(batch_size, dtype=tf.int64) * start_id]
-        encoder_output = self._reshape_encoder_output(encoder_output)
-        memory_state, carry_state = self.init_lstm_states(encoder_output)
-        keep_generating_mask = tf.ones(batch_size, dtype=tf.int64)
-        for t in range(1, max_len):
-            prediction, _, memory_state, carry_state = self.call(encoder_output, sequences[t - 1],
-                                                                 memory_state, carry_state)
-            if mode == "stochastic":
-                dist = tfp.distributions.Categorical(probs=prediction)
-                tokens = dist.sample()
-            elif mode == "deterministic":
-                tokens = tf.argmax(prediction, axis=1)
-            tokens *= keep_generating_mask
-            sequences.append(tokens)
-            keep_generating_mask = tf.cast(tokens != end_id, dtype=tf.int64) * keep_generating_mask
-        return tf.stack(sequences, axis=1)
+    def sample(self, encoder_output, initial_sequence, sequence_length, mode, n_samples, training):
+        if mode not in ["stochastic", "deterministic"]:
+            raise ValueError(f"Mode must be one of - stochastic, deterministic")
 
-    def sample(self, encoder_output, initial_values, sequence_length, n_samples):
-        encoder_output = self._reshape_encoder_output(encoder_output)
-        init_sequence_length = initial_values.shape[1]
-        init_sequences = [tf.argmax(initial_values[:, 0, :], axis=1)]
-        init_memory_state, init_carry_state = self.init_lstm_states(encoder_output)
-        for t in range(1, init_sequence_length):
-            prediction, _, init_memory_state, init_carry_state = self.call(encoder_output, init_sequences[t - 1],
-                                                                           init_memory_state, init_carry_state)
-            init_sequences.append(tf.argmax(prediction, axis=1))
+        initial_sequence_length = initial_sequence.shape[1]
+        initial_sequence = tf.split(initial_sequence, num_or_size_splits=initial_sequence_length, axis=1)
+        initial_sequence = [tf.cast(tf.squeeze(s, axis=1), dtype=tf.int64) for s in initial_sequence]
 
+        initial_probabilities = []
+        encoder_output = self._reshape_encoder_output(encoder_output)
+        initial_memory_state, initial_carry_state = self.init_lstm_states(encoder_output)
+        for t in range(initial_sequence_length):
+            prediction, _, initial_memory_state, initial_carry_state = self.call(
+                encoder_output, initial_sequence[t], initial_memory_state, initial_carry_state, training=training
+            )
+            initial_probabilities.append(prediction)
         samples = []
+        sample_probabilities = []
         for n in range(n_samples):
-            sequences = [tf.identity(s) for s in init_sequences]
-            memory_state, carry_state = tf.identity(init_memory_state), tf.identity(init_carry_state)
-            for t in range(init_sequence_length, sequence_length):
-                prediction, _, memory_state, carry_state = self.call(encoder_output, sequences[t - 1],
-                                                                     memory_state, carry_state)
-                sequences.append(tfp.distributions.Categorical(probs=prediction, dtype=tf.int64).sample())
-            samples.append(tf.stack(sequences, axis=1))
-        return samples
+            sequence = [tf.identity(s) for s in initial_sequence]
+            probabilities = [tf.identity(p) for p in initial_probabilities]
+            memory_state, carry_state = tf.identity(initial_memory_state), tf.identity(initial_carry_state)
+            for t in range(initial_sequence_length, sequence_length):
+                prediction, _, memory_state, carry_state = self.call(encoder_output, sequence[t - 1],
+                                                                     memory_state, carry_state, training=training)
+                if mode == "deterministic":
+                    sequence.append(tf.argmax(prediction, axis=1))
+                else:
+                    sequence.append(tfp.distributions.Categorical(probs=prediction, dtype=tf.int64).sample())
+                probabilities.append(prediction)
+            samples.append(tf.stack(sequence, axis=1))
+            sample_probabilities.append(tf.stack(probabilities, axis=1))
+        return samples, sample_probabilities
 
     def init_lstm_states(self, encoder_output):
         # TODO: add random vector z here?
