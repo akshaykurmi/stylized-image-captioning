@@ -12,13 +12,13 @@ logger = logging.getLogger(__name__)
 
 
 class PolicyGradientLoss:
-    def __call__(self, captions, predictions, rewards):
-        predictions = tf.reshape(predictions, shape=(-1, predictions.shape[-1]))
+    def __call__(self, captions, probabilities, rewards):
+        probabilities = tf.reshape(probabilities, shape=(-1, probabilities.shape[-1]))
         captions = tf.reshape(captions, shape=(-1,))
         rewards = tf.reshape(rewards, shape=(-1,))
-        indices = tf.stack([tf.range(captions.shape[0]), captions], axis=1)
-        predictions = tf.gather_nd(predictions, indices)
-        loss = -tf.reduce_sum(tf.math.log(predictions) * rewards)
+        indices = tf.stack([tf.range(captions.shape[0], dtype=tf.int64), captions], axis=1)
+        probabilities = tf.gather_nd(probabilities, indices)
+        loss = -tf.reduce_sum(tf.math.log(probabilities) * rewards)
         return loss
 
 
@@ -32,40 +32,48 @@ class MonteCarloRollout:
         # TODO: how to incorporate update rate here?
         self.generator.set_weights(generator.get_weights())
 
-    def calculate_rewards(self, encoder_output, predictions, discriminator):
-        sequence_length = predictions.shape[1]
+    def calculate_rewards(self, encoder_output, captions, discriminator, training):
+        sequence_length = captions.shape[1]
         rewards = []
         for t in range(1, sequence_length):
-            initial_values = predictions[:, :t, :]
-            samples = self.generator.sample(encoder_output, initial_values, sequence_length, self.n_rollouts)
+            initial_sequence = captions[:, :t]
+            samples = self.generator.sample(encoder_output, initial_sequence, sequence_length,
+                                            mode="stochastic", n_samples=self.n_rollouts, training=training)[0]
             rewards_t = tf.reduce_mean([discriminator(encoder_output, s) for s in samples], axis=0)
             rewards.append(rewards_t)
-        rewards.append(discriminator(encoder_output, tf.argmax(predictions, axis=2)))
+        rewards.append(discriminator(encoder_output, captions))
         return tf.squeeze(tf.stack(rewards, axis=1))
 
 
 @tf.function
-def generator_train_batch_pg(batch, encoder, generator, discriminator, optimizer, loss_fn, rollout):
+def generator_train_batch_pg(batch, encoder, generator, discriminator, optimizer, loss_fn, rollout, tokenizer):
     with tf.GradientTape(watch_accessed_variables=False) as tape:
         tape.watch(generator.trainable_variables)
-        images, captions = batch
+        images = batch[0]
+        batch_size = images.shape[0]
         encoder_output = encoder(images)
-        # TODO: teacher_forcing_rate = 0 here?
-        predictions, _ = generator.forward(encoder_output, captions, training=True)
-        rewards = rollout.calculate_rewards(encoder_output, predictions, discriminator)
-        loss = loss_fn(captions, predictions, rewards)
+        initial_sequence = tf.ones((batch_size, 1), dtype=tf.int64) * tokenizer.start_id
+        captions, probabilities = generator.sample(encoder_output, initial_sequence, sequence_length=20,
+                                                   mode="stochastic", n_samples=1, training=True)
+        captions, probabilities = captions[0], probabilities[0]
+        rewards = rollout.calculate_rewards(encoder_output, captions, discriminator, training=True)
+        loss = loss_fn(captions, probabilities, rewards)
         gradients = tape.gradient(loss, generator.trainable_variables)
     optimizer.apply_gradients(zip(gradients, generator.trainable_variables))
     return loss
 
 
 @tf.function
-def generator_loss_pg(batch, encoder, generator, discriminator, loss_fn, rollout):
-    images, captions = batch
+def generator_loss_pg(batch, encoder, generator, discriminator, loss_fn, rollout, tokenizer):
+    images = batch[0]
+    batch_size = images.shape[0]
     encoder_output = encoder(images)
-    predictions, _ = generator.forward(encoder_output, captions)
-    rewards = rollout.calculate_rewards(encoder_output, predictions, discriminator)
-    loss = loss_fn(captions, predictions, rewards)
+    initial_sequence = tf.ones((batch_size, 1), dtype=tf.int64) * tokenizer.start_id
+    captions, probabilities = generator.sample(encoder_output, initial_sequence, sequence_length=20,
+                                               mode="stochastic", n_samples=1, training=False)
+    captions, probabilities = captions[0], probabilities[0]
+    rewards = rollout.calculate_rewards(encoder_output, captions, discriminator, training=False)
+    loss = loss_fn(captions, probabilities, rewards)
     return loss
 
 
@@ -75,7 +83,8 @@ def generator_train_batch_mle(batch, encoder, generator, loss_fn, optimizer, dsa
         tape.watch(generator.trainable_variables)
         images, captions = batch
         encoder_output = encoder(images)
-        predictions, attention_alphas = generator.forward(encoder_output, captions, training=True)
+        predictions, attention_alphas = generator.forward(encoder_output, captions, mode="stochastic",
+                                                          teacher_forcing_rate=1, training=True)
         loss = loss_fn(captions, predictions)
         # TODO: Include doubly stochastic attention loss?
         # loss += dsa_lambda * tf.reduce_mean(1. - tf.reduce_sum(attention_alphas, axis=1) ** 2)
@@ -88,7 +97,8 @@ def generator_train_batch_mle(batch, encoder, generator, loss_fn, optimizer, dsa
 def generator_loss_mle(batch, encoder, generator, loss_fn, dsa_lambda):
     images, captions = batch
     encoder_output = encoder(images)
-    predictions, attention_alphas = generator.forward(encoder_output, captions)
+    predictions, attention_alphas = generator.forward(encoder_output, captions, mode="stochastic",
+                                                      teacher_forcing_rate=1, training=False)
     loss = loss_fn(captions, predictions)
     # TODO: Include doubly stochastic attention loss?
     # loss += dsa_lambda * tf.reduce_mean(1. - tf.reduce_sum(attention_alphas, axis=1) ** 2)
@@ -133,9 +143,11 @@ def discriminator_loss_mle(batches, encoder, discriminator, loss_fn):
 @tf.function
 def generate_fake_captions(true_batch, encoder, generator, tokenizer):
     images, labels, sample_weights = true_batch[0], true_batch[2], true_batch[3]
-    encoder_outputs = encoder(images)
-    captions = generator.generate_caption(encoder_outputs, mode="deterministic",
-                                          start_id=tokenizer.start_id, end_id=tokenizer.end_id)
+    batch_size = images.shape[0]
+    encoder_output = encoder(images)
+    initial_sequence = tf.ones((batch_size, 1), dtype=tf.int64) * tokenizer.start_id
+    captions = generator.sample(encoder_output, initial_sequence, sequence_length=20,
+                                mode="stochastic", n_samples=1, training=False)[0][0]
     return images, captions, labels, sample_weights
 
 
@@ -326,8 +338,8 @@ def adversarially_train_generator_and_discriminator(args, dataset_loader):
         for _ in tqdm(range(args.adversarial_g_steps), desc="Training Generator", unit="batch"):
             generator_step.assign_add(1)
             train_batch = next(generator_train_dataset)
-            pg_loss = generator_train_batch_pg(train_batch, encoder, generator, discriminator,
-                                               generator_optimizer, generator_loss_fn_pg, rollout)
+            pg_loss = generator_train_batch_pg(train_batch, encoder, generator, discriminator, generator_optimizer,
+                                               generator_loss_fn_pg, rollout, dataset_loader.tokenizer)
             if generator_step % args.generator_adversarial_logging_steps == 0:
                 mle_loss = generator_loss_mle(train_batch, encoder, generator, generator_loss_fn_mle,
                                               args.generator_adversarial_dsa_lambda)
@@ -357,8 +369,10 @@ def adversarially_train_generator_and_discriminator(args, dataset_loader):
             logger.info("-- Calculating generator validation loss")
             generator_losses = defaultdict(list)
             for val_batch in generator_val_dataset:
-                generator_losses["pg"].append(generator_loss_pg(val_batch, encoder, generator, discriminator,
-                                                                generator_loss_fn_pg, rollout))
+                generator_losses["pg"].append(
+                    generator_loss_pg(val_batch, encoder, generator, discriminator, generator_loss_fn_pg, rollout,
+                                      dataset_loader.tokenizer)
+                )
                 generator_losses["mle"].append(generator_loss_mle(val_batch, encoder, generator, generator_loss_fn_mle,
                                                                   args.generator_adversarial_dsa_lambda))
             with val_summary_writer.as_default(), tf.name_scope("generator_adversarial_training"):
