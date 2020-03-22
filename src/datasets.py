@@ -14,6 +14,9 @@ from preprocess import Tokenizer
 
 logger = logging.getLogger(__name__)
 
+resnet = tf.keras.applications.resnet_v2.ResNet101V2(include_top=False, weights="imagenet")
+for layer in resnet.layers:
+    layer.trainable = False
 
 class PersonalityCaptions:
     def __init__(self, data_dir):
@@ -74,6 +77,19 @@ class DatasetLoader:
         self.tokenizer = Tokenizer()
         self.tokenizer.fit_on_texts([d["caption"] for d in self.dataset.load("train")])
 
+    def encode_images(self, split):
+        data = self.dataset.load(split)
+        image_paths = tf.convert_to_tensor([d["image_path"] for d in data])
+        tf_dataset = tf.data.Dataset.from_tensor_slices((image_paths, image_paths))
+        tf_dataset = tf_dataset.map(self._image_imgpath_mapper, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+        tf_dataset = tf_dataset.batch(1)
+        tf_dataset = tf_dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
+        for img_tensor, path_byte in tf_dataset:
+            path = path_byte.numpy()[0].decode("utf-8")
+            path_pkl = path[:-3] + "pkl"
+            preprocessed_img = tf.keras.applications.resnet_v2.preprocess_input(img_tensor)
+            joblib.dump(preprocessed_img.numpy(), open(path_pkl, "wb"))
+
     def load_generator_dataset(self, split, batch_size, repeat):
         data = self.dataset.load(split)
         for d in data:
@@ -126,3 +142,41 @@ class DatasetLoader:
         img = tf.cast(img, dtype=tf.float32)
         img = tf.image.resize(img, [299, 299])
         return img, sequence
+
+    @staticmethod
+    def _data_mapper(image_path, sequence, additional_captions, styles):
+        #resnet = tf.keras.applications.resnet_v2.ResNet101V2(include_top=False, weights="imagenet")
+        img = tf.io.read_file(image_path)
+        img = tf.image.decode_jpeg(img, channels=3)
+        img = tf.cast(img, dtype=tf.float32)
+        img = tf.image.resize(img, [299, 299])
+        preprocessed_img = tf.keras.applications.resnet_v2.preprocess_input(img)
+        #image_features = resnet(preprocessed_img)
+        #return image_features, sequence, additional_captions, styles
+        return preprocessed_img, sequence, additional_captions, styles
+
+    @staticmethod
+    def _img_feature_mapper(preprocessed_img, sequence, additional_captions, styles):
+        img_feat = resnet(preprocessed_img)
+        return img_feat, sequence, additional_captions, styles
+
+    @staticmethod
+    def _img_selector(img_feat, sequence, additional_captions, styles):
+        #img_feat = resnet(preprocessed_img)
+        return img_feat
+
+## For testing
+pc = PersonalityCaptions("../data")
+data = pc.load("train")
+image_paths = tf.convert_to_tensor([d["image_path"] for d in data])
+sequences = tf.ragged.constant([d["caption"] for d in data])
+additional_captions = tf.ragged.constant([d["additional_captions"] for d in data])
+styles = tf.convert_to_tensor([d["style"] for d in data])
+tf_dataset = tf.data.Dataset.from_tensor_slices((image_paths, sequences, additional_captions, styles))
+tf_dataset = tf_dataset.map(DatasetLoader(pc)._data_mapper, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+tf_dataset = tf_dataset.batch(64)
+tf_dataset = tf_dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
+tf_dataset = tf_dataset.map(DatasetLoader(pc)._img_feature_mapper)
+writer = tf.data.experimental.TFRecordWriter("image_features.tfrecord")
+writer.write(tf_dataset)
+
