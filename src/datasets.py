@@ -156,27 +156,42 @@ class DatasetLoader:
         return preprocessed_img, sequence, additional_captions, styles
 
     @staticmethod
-    def _img_feature_mapper(preprocessed_img, sequence, additional_captions, styles):
-        img_feat = resnet(preprocessed_img)
-        return img_feat, sequence, additional_captions, styles
+    def _resnet_feature_mapper(preprocessed_img, sequence, additional_captions, styles):
+        resnet_feat = resnet(preprocessed_img)
+        return resnet_feat, sequence, additional_captions, styles
 
-    @staticmethod
-    def _img_selector(img_feat, sequence, additional_captions, styles):
-        #img_feat = resnet(preprocessed_img)
-        return img_feat
 
-## For testing
+
+## Scratch space
 pc = PersonalityCaptions("../data")
 data = pc.load("train")
 image_paths = tf.convert_to_tensor([d["image_path"] for d in data])
-sequences = tf.ragged.constant([d["caption"] for d in data])
-additional_captions = tf.ragged.constant([d["additional_captions"] for d in data])
+sequences = tf.convert_to_tensor([d["caption"] for d in data]) # changed from RaggedTensor
+additional_captions = tf.convert_to_tensor([d["additional_captions"] for d in data]) # changed from RaggedTensor
 styles = tf.convert_to_tensor([d["style"] for d in data])
 tf_dataset = tf.data.Dataset.from_tensor_slices((image_paths, sequences, additional_captions, styles))
-tf_dataset = tf_dataset.map(DatasetLoader(pc)._data_mapper, num_parallel_calls=tf.data.experimental.AUTOTUNE)
-tf_dataset = tf_dataset.batch(64)
+tf_dataset = tf_dataset.map(DatasetLoader(pc)._data_mapper, num_parallel_calls=tf.data.experimental.AUTOTUNE) # Reads the image from disk and preprocesses the image using resnet.preprocess_input
+tf_dataset = tf_dataset.batch(64) # Probably wold need a bigger batch size so the record files are in larger chunks
 tf_dataset = tf_dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
-tf_dataset = tf_dataset.map(DatasetLoader(pc)._img_feature_mapper)
-writer = tf.data.experimental.TFRecordWriter("image_features.tfrecord")
-writer.write(tf_dataset)
+tf_dataset = tf_dataset.map(DatasetLoader(pc)._resnet_feature_mapper) # Encodes preprocessed imag. Output is of form (resnet_features, sequence, additional captions, styles)
+#writer = tf.data.experimental.TFRecordWriter("image_features.tfrecord")
 
+i=0
+for batch in tqdm(tf_dataset):
+    resnet_feat, sequence, additional_captions, styles = batch
+    resnet_feat_b = tf.io.serialize_tensor(resnet_feat)
+    sequences_b = tf.io.serialize_tensor(sequences)
+    additional_captions_b = tf.io.serialize_tensor(additional_captions)
+    styles_b = tf.io.serialize_tensor(styles)
+
+    # Now we need to
+    writer_b = tf.data.experimental.TFRecordWriter("image_features_" + str(i) + ".tfrecord")
+    tf_data_bat = tf.data.Dataset.from_tensor_slices((resnet_feat_b, sequences_b, additional_captions_b, styles_b))
+    writer_b.write(tf_data_bat)
+
+    i+=1
+
+
+
+
+# writer.write(tf_dataset)
