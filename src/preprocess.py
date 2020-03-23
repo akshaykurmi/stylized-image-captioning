@@ -28,11 +28,13 @@ class Tokenizer:
 
     def preprocess(self, text):
         t = text.lower()
-        t = re.sub(f"([{string.punctuation}])", r" \1 ", t)
+        #t = re.sub(f"([{string.punctuation}])", r" \1 ", t)
+        t = re.sub("([%s])" % (string.punctuation), r" \1 ", t)
         t = re.sub(r"[^a-zA-Z.?!,;'\"]+", r" ", t)
         t = re.sub(r"\s+", r" ", t)
         t = t.strip()
-        t = f"{self.start} {t} {self.end}"
+        #t = f"{self.start} {t} {self.end}"
+        t = self.start + " " + t + " " + self.end
         t = t.split(" ")
         return t
 

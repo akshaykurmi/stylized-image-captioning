@@ -41,17 +41,19 @@ class PersonalityCaptions:
         os.makedirs(self.image_dir, exist_ok=True)
         downloaded_images = set(os.listdir(self.image_dir))
         for hash in tqdm(hashes, unit="img"):
-            image_fname = f"{hash}.jpg"
+            image_fname = hash + ".jpg"
             if image_fname in downloaded_images:
                 continue
-            image_url = f"{self.image_url_prefix}/{hash[:3]}/{hash[3:6]}/{image_fname}"
+            #image_url = f"{self.image_url_prefix}/{hash[:3]}/{hash[3:6]}/{image_fname}"
+            image_url = self.image_url_prefix + "/" + hash[:3] + "/" + hash[3:6] + "/" + image_fname
             try:
                 response = urllib.request.urlopen(image_url)
                 with open(os.path.join(self.image_dir, image_fname), "wb") as f:
                     f.write(response.read())
                     downloaded_images.add(image_fname)
             except HTTPError as e:
-                print(f"HTTP Error {e.code} - {image_url}")
+                #print(f"HTTP Error {e.code} - {image_url}")
+                print("HTTP Error " + str(e.code) + " - " + image_url)
                 continue
 
     def load(self, split):
@@ -59,12 +61,13 @@ class PersonalityCaptions:
         downloaded_images = set(os.listdir(self.image_dir))
         with open(os.path.join(self.data_dir, file_to_load), "r") as f:
             data = json.load(f)
-        data = filter(lambda d: f"{d['image_hash']}.jpg" in downloaded_images, data)
+        #data = filter(lambda d: f"{d['image_hash']}.jpg" in downloaded_images, data)
+        data = filter(lambda d: d['image_hash'] + ".jpg" in downloaded_images, data)
         data = map(lambda d: {
             "style": d["personality"],
             "caption": d["comment"],
             "additional_captions": d["additional_comments"] if "additional_comments" in d else [],
-            "image_path": os.path.join(self.image_dir, f"{d['image_hash']}.jpg")
+            "image_path": os.path.join(self.image_dir, d['image_hash'] + ".jpg")
         }, data)
         return list(data)
 
