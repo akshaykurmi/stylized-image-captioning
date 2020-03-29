@@ -17,10 +17,10 @@ logger = logging.getLogger(__name__)
 
 
 class PersonalityCaptions:
-    def __init__(self, data_dir, cache_dir):
-        self.data_dir = data_dir
-        self.cache_dir = cache_dir
-        self.image_dir = os.path.join(self.data_dir, "images")
+    def __init__(self, data_dir):
+        self.main_dir = os.path.join(data_dir, "main")
+        self.cache_dir = os.path.join(data_dir, "cache")
+        self.image_dir = os.path.join(data_dir, "images")
         self.image_url_prefix = "https://multimedia-commons.s3-us-west-2.amazonaws.com/data/images"
         self.captions_url = "http://parl.ai/downloads/personality_captions/personality_captions.tgz"
         self.train_file, self.val_file, self.test_file = "train.json", "val.json", "test.json"
@@ -28,15 +28,15 @@ class PersonalityCaptions:
         self.metadata_files = ["personalities.json", "personalities.txt"]
 
     def download(self):
-        os.makedirs(self.data_dir, exist_ok=True)
-        if not all([cf in os.listdir(self.data_dir) for cf in self.metadata_files + list(self.dataset_files.values())]):
+        os.makedirs(self.main_dir, exist_ok=True)
+        if not all([cf in os.listdir(self.main_dir) for cf in self.metadata_files + list(self.dataset_files.values())]):
             response = urllib.request.urlopen(self.captions_url)
             tar = tarfile.open(fileobj=io.BytesIO(response.read()), mode="r:gz")
-            tar.extractall(path=self.data_dir)
+            tar.extractall(path=self.main_dir)
             tar.close()
         hashes = []
-        for fname in self.dataset_files.values():
-            with open(os.path.join(self.data_dir, fname), "r") as f:
+        for file_name in self.dataset_files.values():
+            with open(os.path.join(self.main_dir, file_name), "r") as f:
                 data = json.load(f)
                 hashes += [d["image_hash"] for d in data]
         os.makedirs(self.image_dir, exist_ok=True)
@@ -58,7 +58,7 @@ class PersonalityCaptions:
     def load(self, split):
         file_to_load = self.dataset_files[split]
         downloaded_images = set(os.listdir(self.image_dir))
-        with open(os.path.join(self.data_dir, file_to_load), "r") as f:
+        with open(os.path.join(self.main_dir, file_to_load), "r") as f:
             data = json.load(f)
         data = filter(lambda d: f"{d['image_hash']}.jpg" in downloaded_images, data)
         data = map(lambda d: {

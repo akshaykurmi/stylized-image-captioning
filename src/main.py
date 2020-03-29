@@ -26,7 +26,6 @@ args = parser.parse_args()
 args.run_id = "run_1"
 args.base_dir = os.path.dirname(os.path.dirname(__file__))
 args.data_dir = os.path.join(args.base_dir, "data", "personality_captions")
-args.cache_dir = os.path.join(args.base_dir, "cache", "personality_captions")
 args.results_dir = os.path.join(args.base_dir, "results")
 args.run_dir = os.path.join(args.results_dir, args.run_id)
 args.checkpoints_dir = os.path.join(args.run_dir, "checkpoints")
@@ -84,7 +83,7 @@ args.adversarial_rollout_update_rate = 1
 
 init_logging(args.log_dir)
 
-personality_captions = PersonalityCaptions(args.data_dir, args.cache_dir)
+personality_captions = PersonalityCaptions(args.data_dir)
 dataset_loader = DatasetManager(personality_captions, args.max_seq_len)
 
 if args.run_download_dataset:
