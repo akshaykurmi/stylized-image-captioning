@@ -2,6 +2,7 @@
 .idea
 .ipynb_checkpoints
 __pycache__
+cache
 data
 results
 
