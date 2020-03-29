@@ -100,10 +100,10 @@ class DatasetManager:
             tf_dataset = tf_dataset.map(lambda i_c, rc: (i_c[0], rc))
         tf_dataset = tf_dataset.map(lambda i, c: (
             i, tf.py_function(self.tokenizer.text_to_sequence, (c, self.max_seq_len), tf.int64),
-            tf.constant(label, dtype=tf.int32), tf.constant(sample_weight, dtype=tf.float32)
+            tf.constant(label, dtype=tf.int32, shape=(1,)), tf.constant(sample_weight, dtype=tf.float32, shape=(1,))
         ), num_parallel_calls=tf.data.experimental.AUTOTUNE)
         tf_dataset = tf_dataset.shuffle(buffer_size=1000)
-        tf_dataset = tf_dataset.padded_batch(batch_size, padded_shapes=([10, 10, 2048], [None], [], []))
+        tf_dataset = tf_dataset.padded_batch(batch_size, padded_shapes=([10, 10, 2048], [None], [None], [None]))
         tf_dataset = tf_dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
         tf_dataset = tf_dataset.repeat(repeat)
         return tf_dataset
