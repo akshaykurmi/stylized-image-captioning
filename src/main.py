@@ -1,25 +1,31 @@
+import logging
 import os
-import shutil
 
 import argparse
+import shutil
 
-from .datasets import PersonalityCaptions, DatasetLoader
+from .datasets import PersonalityCaptions, DatasetManager
 from .train import pretrain_generator, pretrain_discriminator, adversarially_train_generator_and_discriminator
 from .utils import init_logging
+
+logger = logging.getLogger(__name__)
 
 args = argparse.Namespace()
 
 args.run_id = "run_1"
 args.base_dir = os.path.dirname(os.path.dirname(__file__))
 args.data_dir = os.path.join(args.base_dir, "data", "personality_captions")
+args.cache_dir = os.path.join(args.base_dir, "cache", "personality_captions")
 args.results_dir = os.path.join(args.base_dir, "results")
 args.run_dir = os.path.join(args.results_dir, args.run_id)
 args.checkpoints_dir = os.path.join(args.run_dir, "checkpoints")
 args.log_dir = os.path.join(args.run_dir, "logs")
-args.overwrite_run_results = True
+args.overwrite_run_results = False
+args.overwrite_cached_dataset = False
 
 args.run_download_dataset = False
-args.run_generator_pretraining = True
+args.run_cache_dataset = False
+args.run_generator_pretraining = False
 args.run_discriminator_pretraining = False
 args.run_adversarial_training = False
 args.run_evaluation = False
@@ -75,22 +81,35 @@ args.adversarial_rollout_update_rate = 1
 
 init_logging(args.log_dir)
 
-personality_captions = PersonalityCaptions(args.data_dir)
-dataset_loader = DatasetLoader(personality_captions, args.max_seq_len)
-
-if args.overwrite_run_results:
-    shutil.rmtree(args.run_dir, ignore_errors=True)
+personality_captions = PersonalityCaptions(args.data_dir, args.cache_dir)
+dataset_loader = DatasetManager(personality_captions, args.max_seq_len)
 
 if args.run_download_dataset:
+    logger.info("***** Downloading Dataset *****")
     personality_captions.download()
 
+if args.run_cache_dataset:
+    logger.info("***** Caching dataset as TFRecords *****")
+    if args.overwrite_cached_dataset:
+        shutil.rmtree(args.cache_dir, ignore_errors=True)
+    os.makedirs(args.cache_dir, exist_ok=False)
+    dataset_loader.cache_dataset("val", batch_size=32, num_batches_per_shard=80)
+    dataset_loader.cache_dataset("test", batch_size=32, num_batches_per_shard=80)
+    dataset_loader.cache_dataset("train", batch_size=32, num_batches_per_shard=80)
+
 if args.run_generator_pretraining:
+    if args.overwrite_run_results:
+        shutil.rmtree(args.run_dir, ignore_errors=True)
     pretrain_generator(args, dataset_loader)
 
 if args.run_discriminator_pretraining:
+    if args.overwrite_run_results:
+        shutil.rmtree(args.run_dir, ignore_errors=True)
     pretrain_discriminator(args, dataset_loader)
 
 if args.run_adversarial_training:
+    if args.overwrite_run_results:
+        shutil.rmtree(args.run_dir, ignore_errors=True)
     adversarially_train_generator_and_discriminator(args, dataset_loader)
 
 if args.run_evaluation:

@@ -1,6 +1,8 @@
-import re
 import string
 from collections import Counter
+
+import re
+import tensorflow as tf
 
 
 class Tokenizer:
@@ -45,20 +47,16 @@ class Tokenizer:
                 self.token_2_index[token] = index
                 self.index_2_token[index] = token
 
-    def texts_to_sequences(self, texts, max_len=None):
-        texts = [self.preprocess(t) for t in texts]
-        texts = list(map(
-            lambda text: list(map(
-                lambda token: self.token_2_index.get(token, self.token_2_index[self.unk]),
-                text)),
-            texts))
+    def text_to_sequence(self, text, max_len=None):
+        sequence = text.numpy().decode("utf-8")
+        sequence = self.preprocess(sequence)
+        sequence = list(map(lambda token: self.token_2_index.get(token, self.token_2_index[self.unk]), sequence))
         if max_len is not None:
-            texts = list(map(lambda text: text[:max_len], texts))
-        return texts
+            sequence = sequence[:max_len]
+        return tf.convert_to_tensor(sequence, dtype=tf.int64)
 
-    def sequences_to_texts(self, sequences):
-        return list(map(
-            lambda sequence: list(map(
-                lambda index: self.index_2_token[index],
-                sequence)),
-            sequences))
+    def sequence_to_text(self, sequence):
+        text = sequence.numpy()
+        text = list(map(lambda index: self.index_2_token[index], text))
+        text = " ".join(text)
+        return tf.convert_to_tensor(text, dtype=tf.string)
