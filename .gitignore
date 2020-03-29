@@ -2,9 +2,8 @@
 .idea
 .ipynb_checkpoints
 __pycache__
-cache
-data
 results
+personality_captions_data
 
 *.iml
 
