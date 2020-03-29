@@ -24,6 +24,7 @@ class PersonalityCaptions:
         self.image_url_prefix = "https://multimedia-commons.s3-us-west-2.amazonaws.com/data/images"
         self.captions_url = "http://parl.ai/downloads/personality_captions/personality_captions.tgz"
         self.train_file, self.val_file, self.test_file = "train.json", "val.json", "test.json"
+        self.valid_images_file = "valid_images.json"
         self.dataset_files = {"train": self.train_file, "val": self.val_file, "test": self.test_file}
         self.metadata_files = ["personalities.json", "personalities.txt"]
 
@@ -54,10 +55,13 @@ class PersonalityCaptions:
             except HTTPError as e:
                 print(f"HTTP Error {e.code} - {image_url}")
                 continue
+        with open(os.path.join(self.main_dir, self.valid_images_file), "w") as f:
+            json.dump(list(downloaded_images), f)
 
     def load(self, split):
         file_to_load = self.dataset_files[split]
-        downloaded_images = set(os.listdir(self.image_dir))
+        with open(os.path.join(self.main_dir, self.valid_images_file), "r") as f:
+            downloaded_images = set(json.load(f))
         with open(os.path.join(self.main_dir, file_to_load), "r") as f:
             data = json.load(f)
         data = filter(lambda d: f"{d['image_hash']}.jpg" in downloaded_images, data)
