@@ -35,6 +35,7 @@ args.log_dir = os.path.join(args.run_dir, "logs")
 args.seed = 42
 args.max_seq_len = 20
 
+args.generator_encoder_units = 2048
 args.generator_embedding_units = 512
 args.generator_attention_units = 512
 args.generator_lstm_units = 512
@@ -66,19 +67,19 @@ args.discriminator_pretrain_checkpoint_steps = 50
 args.generator_adversarial_learning_rate = 1e-4
 args.generator_adversarial_grad_clipvalue = 5.
 args.generator_adversarial_logging_steps = 1
-args.generator_adversarial_batch_size = 64
+args.generator_adversarial_batch_size = 16
 args.generator_adversarial_dsa_lambda = 0.9
 args.discriminator_adversarial_learning_rate = 1e-4
 args.discriminator_adversarial_grad_clipvalue = 5.
 args.discriminator_adversarial_logging_steps = 1
-args.discriminator_adversarial_batch_size = 22
+args.discriminator_adversarial_batch_size = 6
 args.discriminator_adversarial_neg_sample_weight = 0.5
 args.adversarial_rounds = 10000
-args.adversarial_validate_rounds = 50
+args.adversarial_validate_rounds = 200
 args.adversarial_checkpoint_rounds = 5
 args.adversarial_g_steps = 1
-args.adversarial_d_steps = 3
-args.adversarial_rollout_n = 10
+args.adversarial_d_steps = 5
+args.adversarial_rollout_n = 5
 args.adversarial_rollout_update_rate = 1
 
 init_logging(args.log_dir)
