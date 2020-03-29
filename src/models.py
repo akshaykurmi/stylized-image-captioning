@@ -86,9 +86,9 @@ class Generator(tf.keras.Model):
             sequences_t = sequences[:, t]
             if t > 0 and np.random.uniform() > teacher_forcing_rate:
                 if mode == "deterministic":
-                    sequences_t = tf.argmax(predictions[t - 1], axis=1)
+                    sequences_t = tf.argmax(predictions[t - 1], axis=1, output_type=tf.int64)
                 else:
-                    sequences_t = tfp.distributions.Categorical(probs=predictions[t - 1]).sample()
+                    sequences_t = tfp.distributions.Categorical(probs=predictions[t - 1], dtype=tf.int64).sample()
             prediction, attention_alpha, memory_state, carry_state = self.call(encoder_output, sequences_t,
                                                                                memory_state, carry_state,
                                                                                training=training)
@@ -122,7 +122,7 @@ class Generator(tf.keras.Model):
                 prediction, _, memory_state, carry_state = self.call(encoder_output, sequence[t - 1],
                                                                      memory_state, carry_state, training=training)
                 if mode == "deterministic":
-                    sequence.append(tf.argmax(prediction, axis=1))
+                    sequence.append(tf.argmax(prediction, axis=1, output_type=tf.int64))
                 else:
                     sequence.append(tfp.distributions.Categorical(probs=prediction, dtype=tf.int64).sample())
                 probabilities.append(prediction)
