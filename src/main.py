@@ -10,7 +10,18 @@ from .utils import init_logging
 
 logger = logging.getLogger(__name__)
 
-args = argparse.Namespace()
+parser = argparse.ArgumentParser()
+
+parser.add_argument("--overwrite_run_results", default=False, action="store_true")
+parser.add_argument("--overwrite_cached_dataset", default=False, action="store_true")
+parser.add_argument("--run_download_dataset", default=False, action="store_true")
+parser.add_argument("--run_cache_dataset", default=False, action="store_true")
+parser.add_argument("--run_generator_pretraining", default=False, action="store_true")
+parser.add_argument("--run_discriminator_pretraining", default=False, action="store_true")
+parser.add_argument("--run_adversarial_training", default=False, action="store_true")
+parser.add_argument("--run_evaluation", default=False, action="store_true")
+
+args = parser.parse_args()
 
 args.run_id = "run_1"
 args.base_dir = os.path.dirname(os.path.dirname(__file__))
@@ -20,15 +31,6 @@ args.results_dir = os.path.join(args.base_dir, "results")
 args.run_dir = os.path.join(args.results_dir, args.run_id)
 args.checkpoints_dir = os.path.join(args.run_dir, "checkpoints")
 args.log_dir = os.path.join(args.run_dir, "logs")
-args.overwrite_run_results = False
-args.overwrite_cached_dataset = False
-
-args.run_download_dataset = False
-args.run_cache_dataset = False
-args.run_generator_pretraining = False
-args.run_discriminator_pretraining = False
-args.run_adversarial_training = False
-args.run_evaluation = False
 
 args.seed = 42
 args.max_seq_len = 20
