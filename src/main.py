@@ -12,6 +12,8 @@ logger = logging.getLogger(__name__)
 
 parser = argparse.ArgumentParser()
 
+parser.add_argument("--run_id", required=True, type=int)
+
 parser.add_argument("--overwrite_run_results", default=False, action="store_true")
 parser.add_argument("--overwrite_cached_dataset", default=False, action="store_true")
 parser.add_argument("--run_download_dataset", default=False, action="store_true")
@@ -23,7 +25,7 @@ parser.add_argument("--run_evaluation", default=False, action="store_true")
 
 args = parser.parse_args()
 
-args.run_id = "run_1"
+args.run_id = f"run_{args.run_id}"
 args.base_dir = os.path.dirname(os.path.dirname(__file__))
 args.data_dir = os.path.join(args.base_dir, "personality_captions_data")
 args.results_dir = os.path.join(args.base_dir, "results")
