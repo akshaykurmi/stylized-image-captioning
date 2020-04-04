@@ -130,6 +130,58 @@ class Generator(tf.keras.Model):
             sample_probabilities.append(tf.stack(probabilities, axis=1))
         return samples, sample_probabilities
 
+    def beam_search(self, encoder_output, sequence_length, beam_size, sos, z=None):
+        batch_size = encoder_output.shape[0]
+
+        encoder_output = self._reshape_encoder_output(encoder_output)
+        encoder_output = tf.reshape(tf.tile(encoder_output, [1, beam_size, 1]),
+                                    ((batch_size * beam_size), *encoder_output.shape[1:]))
+
+        memory_state, carry_state = self.init_lstm_states(encoder_output, z)
+
+        sequences = tf.constant(sos, shape=((batch_size * beam_size), 1), dtype=tf.int64)  # (8*5, 1)
+        sequences_log_probs = tf.constant(0, shape=((batch_size * beam_size), 1), dtype=tf.float32)  # (8*5, 1)
+
+        for t in range(sequence_length - 1):
+            current_tokens = sequences[:, -1]
+            current_probs = sequences_log_probs[:, -1]
+            prediction, _, memory_state, carry_state = self.call(encoder_output, current_tokens,
+                                                                 memory_state, carry_state, training=False)
+            prediction = tf.math.log(prediction)
+            probs_l1, indices_l1 = tf.math.top_k(prediction, k=beam_size)  # (8*5, 5)
+            probs_l1 += tf.transpose(tf.reshape(
+                tf.tile(current_probs, [beam_size]), (beam_size, batch_size * beam_size)
+            ))
+            probs_l1 = tf.reshape(probs_l1, (batch_size, beam_size * beam_size))  # (8, 5*5)
+            indices_l1 = tf.cast(indices_l1, dtype=tf.int64)
+            indices_l1 = tf.reshape(indices_l1, (batch_size, beam_size * beam_size))  # (8, 5*5)
+            probs_l2, indices_l2 = tf.math.top_k(probs_l1, k=beam_size)  # (8, 5)
+
+            next_tokens = tf.gather_nd(indices_l1, tf.stack([
+                tf.repeat(tf.range(batch_size), beam_size, axis=0),
+                tf.reshape(indices_l2, (-1,))
+            ], axis=1))
+
+            current_reordered_indices = tf.math.reduce_sum(tf.stack([
+                tf.repeat(tf.range(batch_size), beam_size, axis=0) * beam_size,
+                tf.reshape(tf.cast(indices_l2 / 5, dtype=tf.int32), (-1,))
+            ], axis=1), axis=1)
+            current_tokens = tf.gather(current_tokens, current_reordered_indices)
+            memory_state = tf.gather(memory_state, current_reordered_indices, axis=0)
+            carry_state = tf.gather(carry_state, current_reordered_indices, axis=0)
+
+            sequences = tf.slice(sequences, [0, 0], [batch_size * beam_size, sequences.shape[1] - 1])
+            sequences = tf.concat([
+                sequences, tf.expand_dims(current_tokens, axis=1), tf.expand_dims(next_tokens, axis=1)
+            ], axis=1)
+            sequences_log_probs = tf.concat([
+                sequences_log_probs, tf.reshape(probs_l2, (-1, 1))
+            ], axis=1)
+
+        sequences = tf.reshape(sequences, (batch_size, beam_size, -1))
+        sequences_log_probs = tf.reshape(sequences_log_probs[:, -1], (batch_size, beam_size))
+        return sequences, sequences_log_probs
+
     def init_lstm_states(self, encoder_output, z):
         if z is None:
             z = self.z_distribution.sample(sample_shape=(encoder_output.shape[0],))
