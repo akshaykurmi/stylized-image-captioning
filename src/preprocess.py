@@ -60,3 +60,11 @@ class Tokenizer:
         text = list(map(lambda index: self.index_2_token[index], text))
         text = " ".join(text)
         return tf.convert_to_tensor(text, dtype=tf.string)
+
+    def sequences_to_texts(self, sequences):
+        initial_shape = sequences.shape
+        sequences = tf.reshape(sequences, (-1,))
+        texts = sequences.numpy()
+        texts = list(map(lambda index: self.index_2_token[index], texts))
+        texts = tf.convert_to_tensor(texts, dtype=tf.string)
+        return tf.reshape(texts, initial_shape)
