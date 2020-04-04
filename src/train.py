@@ -109,7 +109,11 @@ def generator_train_batch_mle(batch, generator, loss_fn, optimizer, dsa_lambda, 
         predictions, attention_alphas = generator.forward(encoder_output, captions, mode="stochastic",
                                                           teacher_forcing_rate=teacher_forcing_rate, training=True)
         loss = loss_fn(captions, predictions)
-        loss += dsa_lambda * tf.reduce_mean(tf.reduce_sum((1 - tf.reduce_sum(attention_alphas, axis=1)) ** 2, axis=1))
+        seq_len = captions.shape[1]
+        n_features = encoder_output.shape[1]
+        loss += dsa_lambda * tf.reduce_mean(tf.reduce_sum(
+            ((seq_len / n_features) - tf.reduce_sum(attention_alphas, axis=1)) ** 2, axis=1
+        ))
         gradients = tape.gradient(loss, generator.trainable_variables)
     optimizer.apply_gradients(zip(gradients, generator.trainable_variables))
     return loss
@@ -121,7 +125,11 @@ def generator_loss_mle(batch, generator, loss_fn, dsa_lambda):
     predictions, attention_alphas = generator.forward(encoder_output, captions, mode="stochastic",
                                                       teacher_forcing_rate=0, training=False)
     loss = loss_fn(captions, predictions)
-    loss += dsa_lambda * tf.reduce_mean(tf.reduce_sum((1 - tf.reduce_sum(attention_alphas, axis=1)) ** 2, axis=1))
+    seq_len = captions.shape[1]
+    n_features = encoder_output.shape[1]
+    loss += dsa_lambda * tf.reduce_mean(tf.reduce_sum(
+        ((seq_len / n_features) - tf.reduce_sum(attention_alphas, axis=1)) ** 2, axis=1
+    ))
     return loss
 
 
@@ -219,6 +227,7 @@ def pretrain_generator(args, dataset_loader):
         if global_step % args.generator_pretrain_checkpoint_steps == 0:
             checkpoint_manager.save(["generator", "generator_pretrain_params"])
 
+    checkpoint_manager.save(["generator", "generator_pretrain_params"])
     logger.info("***** Pretraining Generator - Ended *****")
 
 
@@ -288,6 +297,7 @@ def pretrain_discriminator(args, dataset_loader):
         if global_step % args.discriminator_pretrain_checkpoint_steps == 0:
             checkpoint_manager.save(["discriminator", "discriminator_pretrain_params"])
 
+    checkpoint_manager.save(["discriminator", "discriminator_pretrain_params"])
     logger.info("***** Pretraining Discriminator - Ended *****")
 
 
@@ -412,4 +422,5 @@ def adversarially_train_generator_and_discriminator(args, dataset_loader):
             with val_summary_writer.as_default(), tf.name_scope("discriminator_adversarial_training"):
                 tf.summary.scalar("crossentropy_loss", tf.reduce_mean(discriminator_losses), step=discriminator_step)
 
+    checkpoint_manager.save(["generator", "discriminator", "adversarial_params"])
     logger.info("***** Adversarially training Generator & Discriminator - Ended *****")
