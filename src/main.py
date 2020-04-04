@@ -5,6 +5,7 @@ import argparse
 import shutil
 
 from .datasets import PersonalityCaptions, DatasetManager
+from .evaluate import generate_captions_for_image
 from .train import pretrain_generator, pretrain_discriminator, adversarially_train_generator_and_discriminator
 from .utils import init_logging
 
@@ -22,6 +23,9 @@ parser.add_argument("--run_generator_pretraining", default=False, action="store_
 parser.add_argument("--run_discriminator_pretraining", default=False, action="store_true")
 parser.add_argument("--run_adversarial_training", default=False, action="store_true")
 parser.add_argument("--run_evaluation", default=False, action="store_true")
+
+parser.add_argument("--generate_captions_for_image", default=False, action="store_true")
+parser.add_argument("--image_path", type=str, default="")
 
 args = parser.parse_args()
 
@@ -118,3 +122,6 @@ if args.run_adversarial_training:
 
 if args.run_evaluation:
     pass
+
+if args.generate_captions_for_image:
+    generate_captions_for_image(args, dataset_manager, args.image_path)
