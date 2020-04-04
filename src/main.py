@@ -86,7 +86,7 @@ args.adversarial_rollout_update_rate = 1
 init_logging(args.log_dir)
 
 personality_captions = PersonalityCaptions(args.data_dir)
-dataset_loader = DatasetManager(personality_captions, args.max_seq_len)
+dataset_manager = DatasetManager(personality_captions, args.max_seq_len)
 
 if args.run_download_dataset:
     logger.info("***** Downloading Dataset *****")
@@ -97,24 +97,24 @@ if args.run_cache_dataset:
     if args.overwrite_cached_dataset:
         shutil.rmtree(args.cache_dir, ignore_errors=True)
     os.makedirs(args.cache_dir, exist_ok=False)
-    dataset_loader.cache_dataset("val", batch_size=32, num_batches_per_shard=80)
-    dataset_loader.cache_dataset("test", batch_size=32, num_batches_per_shard=80)
-    dataset_loader.cache_dataset("train", batch_size=32, num_batches_per_shard=80)
+    dataset_manager.cache_dataset("val", batch_size=32, num_batches_per_shard=80)
+    dataset_manager.cache_dataset("test", batch_size=32, num_batches_per_shard=80)
+    dataset_manager.cache_dataset("train", batch_size=32, num_batches_per_shard=80)
 
 if args.run_generator_pretraining:
     if args.overwrite_run_results:
         shutil.rmtree(args.run_dir, ignore_errors=True)
-    pretrain_generator(args, dataset_loader)
+    pretrain_generator(args, dataset_manager)
 
 if args.run_discriminator_pretraining:
     if args.overwrite_run_results:
         shutil.rmtree(args.run_dir, ignore_errors=True)
-    pretrain_discriminator(args, dataset_loader)
+    pretrain_discriminator(args, dataset_manager)
 
 if args.run_adversarial_training:
     if args.overwrite_run_results:
         shutil.rmtree(args.run_dir, ignore_errors=True)
-    adversarially_train_generator_and_discriminator(args, dataset_loader)
+    adversarially_train_generator_and_discriminator(args, dataset_manager)
 
 if args.run_evaluation:
     pass

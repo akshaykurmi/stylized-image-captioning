@@ -175,13 +175,13 @@ def generate_fake_captions(true_batch, generator, tokenizer, max_seq_len):
     return encoder_output, captions, labels, sample_weights
 
 
-def pretrain_generator(args, dataset_loader):
+def pretrain_generator(args, dataset_manager):
     logger.info("***** Pretraining Generator - Started *****")
 
     set_seed(args.seed)
 
     logger.info("-- Initializing")
-    generator = Generator(vocab_size=dataset_loader.tokenizer.vocab_size, lstm_units=args.generator_lstm_units,
+    generator = Generator(vocab_size=dataset_manager.tokenizer.vocab_size, lstm_units=args.generator_lstm_units,
                           embedding_units=args.generator_embedding_units, lstm_dropout=args.generator_lstm_dropout,
                           attention_units=args.generator_attention_units, encoder_units=args.generator_encoder_units,
                           z_units=args.generator_z_units)
@@ -203,9 +203,9 @@ def pretrain_generator(args, dataset_loader):
     checkpoint_manager.restore_latest()
 
     logger.info("-- Loading training and validation sets")
-    train_dataset = dataset_loader.load_generator_dataset(
+    train_dataset = dataset_manager.load_generator_dataset(
         "train", batch_size=args.generator_pretrain_batch_size, repeat=args.generator_pretrain_epochs)
-    val_dataset = dataset_loader.load_generator_dataset(
+    val_dataset = dataset_manager.load_generator_dataset(
         "val", batch_size=args.generator_pretrain_batch_size, repeat=1)
 
     for train_batch in tqdm(train_dataset, desc="Batch", unit="batch"):
@@ -231,17 +231,17 @@ def pretrain_generator(args, dataset_loader):
     logger.info("***** Pretraining Generator - Ended *****")
 
 
-def pretrain_discriminator(args, dataset_loader):
+def pretrain_discriminator(args, dataset_manager):
     logger.info("***** Pretraining Discriminator - Started *****")
 
     set_seed(args.seed)
 
     logger.info("-- Initializing")
-    generator = Generator(vocab_size=dataset_loader.tokenizer.vocab_size, lstm_units=args.generator_lstm_units,
+    generator = Generator(vocab_size=dataset_manager.tokenizer.vocab_size, lstm_units=args.generator_lstm_units,
                           embedding_units=args.generator_embedding_units, lstm_dropout=args.generator_lstm_dropout,
                           attention_units=args.generator_attention_units, encoder_units=args.generator_encoder_units,
                           z_units=args.generator_z_units)
-    discriminator = Discriminator(vocab_size=dataset_loader.tokenizer.vocab_size,
+    discriminator = Discriminator(vocab_size=dataset_manager.tokenizer.vocab_size,
                                   embedding_units=args.discriminator_embedding_units,
                                   lstm_units=args.discriminator_lstm_units)
 
@@ -263,20 +263,20 @@ def pretrain_discriminator(args, dataset_loader):
     logger.info("-- Loading training and validation sets")
     train_dataset, val_dataset = {}, {}
     for s, d, r in [("train", train_dataset, args.discriminator_pretrain_epochs), ("val", val_dataset, 1)]:
-        d["true"] = dataset_loader.load_discriminator_dataset(
+        d["true"] = dataset_manager.load_discriminator_dataset(
             split=s, batch_size=args.discriminator_pretrain_batch_size, repeat=r,
             label=1, randomize_captions=False, sample_weight=1)
-        d["fake"] = dataset_loader.load_discriminator_dataset(
+        d["fake"] = dataset_manager.load_discriminator_dataset(
             split=s, batch_size=args.discriminator_pretrain_batch_size, repeat=r,
             label=0, randomize_captions=False, sample_weight=args.discriminator_pretrain_neg_sample_weight)
-        d["shuffled"] = dataset_loader.load_discriminator_dataset(
+        d["shuffled"] = dataset_manager.load_discriminator_dataset(
             split=s, batch_size=args.discriminator_pretrain_batch_size, repeat=r,
             label=0, randomize_captions=True, sample_weight=args.discriminator_pretrain_neg_sample_weight)
 
     for true_batch, fake_batch, shuffled_batch in tqdm(zip(train_dataset["true"], train_dataset["fake"],
                                                            train_dataset["shuffled"]), desc="Batch", unit="batch"):
         global_step.assign_add(1)
-        fake_batch = generate_fake_captions(fake_batch, generator, dataset_loader.tokenizer, args.max_seq_len)
+        fake_batch = generate_fake_captions(fake_batch, generator, dataset_manager.tokenizer, args.max_seq_len)
         loss = discriminator_train_batch_mle((true_batch, fake_batch, shuffled_batch), discriminator, loss_fn,
                                              optimizer)
         if global_step % args.discriminator_pretrain_logging_steps == 0:
@@ -288,7 +288,7 @@ def pretrain_discriminator(args, dataset_loader):
             losses = []
             for val_true_batch, val_fake_batch, val_shuffled_batch in zip(val_dataset["true"], val_dataset["fake"],
                                                                           val_dataset["shuffled"]):
-                val_fake_batch = generate_fake_captions(val_fake_batch, generator, dataset_loader.tokenizer,
+                val_fake_batch = generate_fake_captions(val_fake_batch, generator, dataset_manager.tokenizer,
                                                         args.max_seq_len)
                 losses.append(discriminator_loss_mle((val_true_batch, val_fake_batch, val_shuffled_batch),
                                                      discriminator, loss_fn))
@@ -301,21 +301,21 @@ def pretrain_discriminator(args, dataset_loader):
     logger.info("***** Pretraining Discriminator - Ended *****")
 
 
-def adversarially_train_generator_and_discriminator(args, dataset_loader):
+def adversarially_train_generator_and_discriminator(args, dataset_manager):
     logger.info("***** Adversarially training Generator & Discriminator - Started *****")
 
     set_seed(args.seed)
 
     logger.info("-- Initializing")
-    generator = Generator(vocab_size=dataset_loader.tokenizer.vocab_size, lstm_units=args.generator_lstm_units,
+    generator = Generator(vocab_size=dataset_manager.tokenizer.vocab_size, lstm_units=args.generator_lstm_units,
                           embedding_units=args.generator_embedding_units, lstm_dropout=args.generator_lstm_dropout,
                           attention_units=args.generator_attention_units, encoder_units=args.generator_encoder_units,
                           z_units=args.generator_z_units)
-    generator_mc = Generator(vocab_size=dataset_loader.tokenizer.vocab_size, lstm_units=args.generator_lstm_units,
+    generator_mc = Generator(vocab_size=dataset_manager.tokenizer.vocab_size, lstm_units=args.generator_lstm_units,
                              embedding_units=args.generator_embedding_units, lstm_dropout=args.generator_lstm_dropout,
                              attention_units=args.generator_attention_units, encoder_units=args.generator_encoder_units,
                              z_units=args.generator_z_units)
-    discriminator = Discriminator(vocab_size=dataset_loader.tokenizer.vocab_size,
+    discriminator = Discriminator(vocab_size=dataset_manager.tokenizer.vocab_size,
                                   embedding_units=args.discriminator_embedding_units,
                                   lstm_units=args.discriminator_lstm_units)
     rollout = MonteCarloRollout(generator_mc, args.adversarial_rollout_n, args.adversarial_rollout_update_rate)
@@ -344,19 +344,19 @@ def adversarially_train_generator_and_discriminator(args, dataset_loader):
     checkpoint_manager.restore_latest()
 
     logger.info("-- Loading training and validation sets")
-    generator_train_dataset = iter(dataset_loader.load_generator_dataset(
+    generator_train_dataset = iter(dataset_manager.load_generator_dataset(
         "train", batch_size=args.generator_adversarial_batch_size, repeat=-1))
-    generator_val_dataset = dataset_loader.load_generator_dataset(
+    generator_val_dataset = dataset_manager.load_generator_dataset(
         "val", batch_size=args.generator_adversarial_batch_size, repeat=1)
     discriminator_train_dataset, discriminator_val_dataset = {}, {}
     for s, d, r in [("train", discriminator_train_dataset, -1), ("val", discriminator_val_dataset, 1)]:
-        d["true"] = dataset_loader.load_discriminator_dataset(
+        d["true"] = dataset_manager.load_discriminator_dataset(
             split=s, batch_size=args.discriminator_adversarial_batch_size, repeat=r,
             label=1, randomize_captions=False, sample_weight=1)
-        d["fake"] = dataset_loader.load_discriminator_dataset(
+        d["fake"] = dataset_manager.load_discriminator_dataset(
             split=s, batch_size=args.discriminator_adversarial_batch_size, repeat=r,
             label=0, randomize_captions=False, sample_weight=args.discriminator_adversarial_neg_sample_weight)
-        d["shuffled"] = dataset_loader.load_discriminator_dataset(
+        d["shuffled"] = dataset_manager.load_discriminator_dataset(
             split=s, batch_size=args.discriminator_adversarial_batch_size, repeat=r,
             label=0, randomize_captions=True, sample_weight=args.discriminator_adversarial_neg_sample_weight)
     discriminator_train_dataset = {k: iter(v) for k, v in discriminator_train_dataset.items()}
@@ -368,7 +368,7 @@ def adversarially_train_generator_and_discriminator(args, dataset_loader):
             generator_step.assign_add(1)
             train_batch = next(generator_train_dataset)
             pg_loss = generator_train_batch_pg(train_batch, generator, discriminator, generator_optimizer,
-                                               generator_loss_fn_pg, rollout, dataset_loader.tokenizer,
+                                               generator_loss_fn_pg, rollout, dataset_manager.tokenizer,
                                                args.max_seq_len)
             if generator_step % args.generator_adversarial_logging_steps == 0:
                 mle_loss = generator_loss_mle(train_batch, generator, generator_loss_fn_mle,
@@ -382,7 +382,7 @@ def adversarially_train_generator_and_discriminator(args, dataset_loader):
             true_batch = next(discriminator_train_dataset["true"])
             fake_batch = next(discriminator_train_dataset["fake"])
             shuffled_batch = next(discriminator_train_dataset["shuffled"])
-            fake_batch = generate_fake_captions(fake_batch, generator, dataset_loader.tokenizer,
+            fake_batch = generate_fake_captions(fake_batch, generator, dataset_manager.tokenizer,
                                                 args.max_seq_len)
             loss = discriminator_train_batch_mle((true_batch, fake_batch, shuffled_batch), discriminator,
                                                  discriminator_loss_fn, discriminator_optimizer)
@@ -402,7 +402,7 @@ def adversarially_train_generator_and_discriminator(args, dataset_loader):
             for val_batch in generator_val_dataset:
                 generator_losses["pg"].append(
                     generator_loss_pg(val_batch, generator, discriminator, generator_loss_fn_pg, rollout,
-                                      dataset_loader.tokenizer, args.max_seq_len)
+                                      dataset_manager.tokenizer, args.max_seq_len)
                 )
                 generator_losses["mle"].append(generator_loss_mle(val_batch, generator, generator_loss_fn_mle,
                                                                   args.generator_adversarial_dsa_lambda))
@@ -415,7 +415,7 @@ def adversarially_train_generator_and_discriminator(args, dataset_loader):
             for val_true_batch, val_fake_batch, val_shuffled_batch in zip(discriminator_val_dataset["true"],
                                                                           discriminator_val_dataset["fake"],
                                                                           discriminator_val_dataset["shuffled"]):
-                val_fake_batch = generate_fake_captions(val_fake_batch, generator, dataset_loader.tokenizer,
+                val_fake_batch = generate_fake_captions(val_fake_batch, generator, dataset_manager.tokenizer,
                                                         args.max_seq_len)
                 discriminator_losses.append(discriminator_loss_mle((val_true_batch, val_fake_batch, val_shuffled_batch),
                                                                    discriminator, discriminator_loss_fn))

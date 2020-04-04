@@ -122,7 +122,7 @@ class DatasetManager:
             tf.convert_to_tensor([d["additional_captions"] for d in data], dtype=tf.string)
         ))
         tf_dataset = tf_dataset.map(
-            lambda i, c, s, ac: (self._load_image(i), c, s, ac),
+            lambda i, c, s, ac: (self.load_image(i), c, s, ac),
             num_parallel_calls=tf.data.experimental.AUTOTUNE
         )
         tf_dataset = tf_dataset.batch(batch_size)
@@ -158,7 +158,7 @@ class DatasetManager:
 
     @staticmethod
     @tf.function
-    def _load_image(image_path):
+    def load_image(image_path):
         img = tf.io.read_file(image_path)
         img = tf.image.decode_jpeg(img, channels=3)
         img = tf.cast(img, dtype=tf.float32)
