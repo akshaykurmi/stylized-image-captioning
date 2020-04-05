@@ -59,10 +59,10 @@ class Generator(tf.keras.Model):
         self.dense_init_carry_state = tf.keras.layers.Dense(units=lstm_units)
         self.dense_init_memory_state = tf.keras.layers.Dense(units=lstm_units)
         self.dense_f_beta = tf.keras.layers.Dense(units=encoder_units, activation="sigmoid")
-        self.dense_lstm_output = tf.keras.layers.Dense(units=self.vocab_size, activation="softmax")
+        self.dense_lstm_output = tf.keras.layers.Dense(units=self.vocab_size, activation="linear")
         self.dropout = tf.keras.layers.Dropout(rate=0.5)
 
-        self.forward(tf.ones((1, 10, 10, 2048)), tf.ones((1, 10)), "deterministic", 1, False)  # initialize weights
+        self.forward(tf.ones((3, 10, 10, 2048)), tf.ones((3, 10)), "deterministic", 1, False)  # initialize weights
 
     def call(self, encoder_output, sequences_t, memory_state, carry_state, training):
         embeddings = self.embedding(sequences_t)
@@ -78,23 +78,42 @@ class Generator(tf.keras.Model):
         if mode not in ["stochastic", "deterministic"]:
             raise ValueError(f"Mode must be one of - stochastic, deterministic")
 
-        sequence_length = sequences.shape[1]
-        predictions, attention_alphas = [], []
+        batch_size = encoder_output.shape[0]
+        sequence_lengths = tf.cast(tf.reduce_sum(tf.sign(tf.abs(sequences)), 1), tf.int32)
+        sort_indices = tf.argsort(sequence_lengths, direction="DESCENDING")
+        sequence_lengths = tf.gather(sequence_lengths, sort_indices, axis=0) - 1
+        encoder_output = tf.gather(encoder_output, sort_indices, axis=0)
+        sequences = tf.gather(sequences, sort_indices, axis=0)
+        max_seq_len = tf.reduce_max(sequence_lengths)
+
         encoder_output = self._reshape_encoder_output(encoder_output)
         memory_state, carry_state = self.init_lstm_states(encoder_output, z)
-        for t in range(sequence_length):
+        predictions = tf.TensorArray(tf.float32, size=max_seq_len, clear_after_read=False,
+                                     element_shape=(batch_size, self.vocab_size))
+        attention_alphas = tf.TensorArray(tf.float32, size=max_seq_len, clear_after_read=False,
+                                          element_shape=(batch_size, encoder_output.shape[1]))
+        for t in range(max_seq_len):
+            batch_size_t = tf.reduce_sum(tf.cast(sequence_lengths > t, dtype=tf.int32))
             sequences_t = sequences[:, t]
             if t > 0 and np.random.uniform() > teacher_forcing_rate:
                 if mode == "deterministic":
-                    sequences_t = tf.argmax(predictions[t - 1], axis=1, output_type=tf.int64)
+                    sequences_t = tf.argmax(predictions.read(t - 1), axis=1, output_type=tf.int64)
                 else:
-                    sequences_t = tfp.distributions.Categorical(probs=predictions[t - 1], dtype=tf.int64).sample()
-            prediction, attention_alpha, memory_state, carry_state = self.call(encoder_output, sequences_t,
-                                                                               memory_state, carry_state,
-                                                                               training=training)
-            predictions.append(prediction)
-            attention_alphas.append(attention_alpha)
-        return tf.stack(predictions, axis=1), tf.stack(attention_alphas, axis=1)
+                    sequences_t = tfp.distributions.Categorical(probs=predictions.read(t - 1),
+                                                                dtype=tf.int64).sample()
+            prediction, attention_alpha, memory_state_t, carry_state_t = self.call(
+                encoder_output[:batch_size_t], sequences_t[:batch_size_t], memory_state[:batch_size_t],
+                carry_state[:batch_size_t], training=training)
+            memory_state_t = tf.pad(memory_state_t, [[0, batch_size - batch_size_t], [0, 0]])
+            memory_state = tf.ensure_shape(memory_state_t, (batch_size, self.lstm_units))
+            carry_state_t = tf.pad(carry_state_t, [[0, batch_size - batch_size_t], [0, 0]])
+            carry_state = tf.ensure_shape(carry_state_t, (batch_size, self.lstm_units))
+            prediction = tf.pad(prediction, [[0, batch_size - batch_size_t], [0, 0]])
+            attention_alpha = tf.pad(attention_alpha, [[0, batch_size - batch_size_t], [0, 0]])
+            predictions = predictions.write(t, prediction)
+            attention_alphas = attention_alphas.write(t, attention_alpha)
+        return (tf.transpose(predictions.stack(), (1, 0, 2)),
+                tf.transpose(attention_alphas.stack(), (1, 0, 2)), sort_indices)
 
     def sample(self, encoder_output, initial_sequence, sequence_length, mode, n_samples, training, z=None):
         if mode not in ["stochastic", "deterministic"]:

@@ -5,21 +5,11 @@ from collections import defaultdict
 import tensorflow as tf
 from tqdm import tqdm
 
+from .losses import GeneratorMLELoss, PolicyGradientLoss
 from .models import Generator, Discriminator
 from .utils import set_seed, MultiCheckpointManager
 
 logger = logging.getLogger(__name__)
-
-
-class PolicyGradientLoss:
-    def __call__(self, captions, probabilities, rewards):
-        probabilities = tf.reshape(probabilities, shape=(-1, probabilities.shape[-1]))
-        captions = tf.reshape(captions, shape=(-1,))
-        rewards = tf.reshape(rewards, shape=(-1,))
-        indices = tf.stack([tf.range(captions.shape[0], dtype=tf.int64), captions], axis=1)
-        probabilities = tf.gather_nd(probabilities, indices)
-        loss = -tf.reduce_sum(tf.math.log(probabilities) * rewards)
-        return loss
 
 
 class MonteCarloRollout:
@@ -86,10 +76,11 @@ def generator_train_batch_mle(batch, generator, loss_fn, optimizer, dsa_lambda, 
     with tf.GradientTape(watch_accessed_variables=False) as tape:
         tape.watch(generator.trainable_variables)
         encoder_output, captions = batch
-        predictions, attention_alphas = generator.forward(encoder_output, captions, mode="stochastic",
-                                                          teacher_forcing_rate=teacher_forcing_rate, training=True)
-        loss = loss_fn(captions, predictions)
-        loss += dsa_lambda * tf.reduce_mean((1 - tf.reduce_sum(attention_alphas, axis=1)) ** 2)
+        predictions, attention_alphas, sort_indices = generator.forward(encoder_output, captions, mode="stochastic",
+                                                                        teacher_forcing_rate=teacher_forcing_rate,
+                                                                        training=True)
+        captions = tf.gather(captions, sort_indices)[:, 1:]
+        loss = loss_fn(captions, predictions, attention_alphas, dsa_lambda)
         gradients = tape.gradient(loss, generator.trainable_variables)
     optimizer.apply_gradients(zip(gradients, generator.trainable_variables))
     return loss
@@ -98,10 +89,10 @@ def generator_train_batch_mle(batch, generator, loss_fn, optimizer, dsa_lambda, 
 @tf.function
 def generator_loss_mle(batch, generator, loss_fn, dsa_lambda):
     encoder_output, captions = batch
-    predictions, attention_alphas = generator.forward(encoder_output, captions, mode="stochastic",
-                                                      teacher_forcing_rate=0, training=False)
-    loss = loss_fn(captions, predictions)
-    loss += dsa_lambda * tf.reduce_mean((1 - tf.reduce_sum(attention_alphas, axis=1)) ** 2)
+    predictions, attention_alphas, sort_indices = generator.forward(encoder_output, captions, mode="stochastic",
+                                                                    teacher_forcing_rate=0, training=False)
+    captions = tf.gather(captions, sort_indices)[:, 1:]
+    loss = loss_fn(captions, predictions, attention_alphas, dsa_lambda)
     return loss
 
 
@@ -158,7 +149,7 @@ def pretrain_generator(args, dataset_manager):
                           attention_units=args.generator_attention_units, encoder_units=args.generator_encoder_units,
                           z_units=args.generator_z_units)
 
-    loss_fn = tf.keras.losses.SparseCategoricalCrossentropy()
+    loss_fn = GeneratorMLELoss()
     optimizer = tf.keras.optimizers.Adam(learning_rate=args.generator_pretrain_learning_rate,
                                          clipvalue=args.generator_pretrain_grad_clipvalue)
 
@@ -290,7 +281,7 @@ def adversarially_train_generator_and_discriminator(args, dataset_manager):
     rollout.update_weights(generator)
 
     generator_loss_fn_pg = PolicyGradientLoss()
-    generator_loss_fn_mle = tf.keras.losses.SparseCategoricalCrossentropy()
+    generator_loss_fn_mle = GeneratorMLELoss()
     discriminator_loss_fn = tf.keras.losses.BinaryCrossentropy()
     generator_optimizer = tf.keras.optimizers.Adam(learning_rate=args.generator_adversarial_learning_rate,
                                                    clipvalue=args.generator_adversarial_grad_clipvalue)
