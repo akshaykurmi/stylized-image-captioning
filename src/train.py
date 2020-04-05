@@ -89,11 +89,7 @@ def generator_train_batch_mle(batch, generator, loss_fn, optimizer, dsa_lambda, 
         predictions, attention_alphas = generator.forward(encoder_output, captions, mode="stochastic",
                                                           teacher_forcing_rate=teacher_forcing_rate, training=True)
         loss = loss_fn(captions, predictions)
-        seq_len = captions.shape[1]
-        n_features = encoder_output.shape[1]
-        loss += dsa_lambda * tf.reduce_mean(tf.reduce_sum(
-            ((seq_len / n_features) - tf.reduce_sum(attention_alphas, axis=1)) ** 2, axis=1
-        ))
+        loss += dsa_lambda * tf.reduce_mean((1 - tf.reduce_sum(attention_alphas, axis=1)) ** 2)
         gradients = tape.gradient(loss, generator.trainable_variables)
     optimizer.apply_gradients(zip(gradients, generator.trainable_variables))
     return loss
@@ -105,11 +101,7 @@ def generator_loss_mle(batch, generator, loss_fn, dsa_lambda):
     predictions, attention_alphas = generator.forward(encoder_output, captions, mode="stochastic",
                                                       teacher_forcing_rate=0, training=False)
     loss = loss_fn(captions, predictions)
-    seq_len = captions.shape[1]
-    n_features = encoder_output.shape[1]
-    loss += dsa_lambda * tf.reduce_mean(tf.reduce_sum(
-        ((seq_len / n_features) - tf.reduce_sum(attention_alphas, axis=1)) ** 2, axis=1
-    ))
+    loss += dsa_lambda * tf.reduce_mean((1 - tf.reduce_sum(attention_alphas, axis=1)) ** 2)
     return loss
 
 
