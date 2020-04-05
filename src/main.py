@@ -6,6 +6,7 @@ import shutil
 
 from .datasets import PersonalityCaptions, DatasetManager
 from .evaluate import generate_captions_for_image
+from .schedules import Constant
 from .train import pretrain_generator, pretrain_discriminator, adversarially_train_generator_and_discriminator
 from .utils import init_logging
 
@@ -49,8 +50,7 @@ args.generator_lstm_dropout = 0.5
 args.discriminator_embedding_units = 512
 args.discriminator_lstm_units = 512
 
-args.generator_pretrain_scheduled_sampling_initial_rate = 1
-args.generator_pretrain_scheduled_sampling_k = 3500
+args.teacher_forcing_schedule = Constant(rate=0.0)
 args.generator_pretrain_learning_rate = 1e-4
 args.generator_pretrain_grad_clipvalue = 5.
 args.generator_pretrain_dsa_lambda = 1.0

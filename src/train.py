@@ -51,26 +51,6 @@ class MonteCarloRollout:
         return tf.squeeze(tf.stack(rewards, axis=1))
 
 
-class InverseSigmoidDecay(tf.optimizers.schedules.LearningRateSchedule):
-    def __init__(self, initial_rate, k, name="inverse_sigmoid_decay"):
-        super().__init__()
-        self.initial_rate = initial_rate
-        self.k = k
-        self.name = name
-
-    def __call__(self, step):
-        with tf.name_scope(self.name):
-            decay = self.k / (self.k + tf.math.exp(step / self.k))
-            return self.initial_rate * decay
-
-    def get_config(self):
-        return {
-            "initial_rate": self.initial_rate,
-            "k": self.k,
-            "name": self.name
-        }
-
-
 @tf.function
 def generator_train_batch_pg(batch, generator, discriminator, optimizer, loss_fn, rollout, tokenizer, max_seq_len):
     with tf.GradientTape(watch_accessed_variables=False) as tape:
@@ -189,8 +169,6 @@ def pretrain_generator(args, dataset_manager):
     loss_fn = tf.keras.losses.SparseCategoricalCrossentropy()
     optimizer = tf.keras.optimizers.Adam(learning_rate=args.generator_pretrain_learning_rate,
                                          clipvalue=args.generator_pretrain_grad_clipvalue)
-    teacher_forcing_schedule = InverseSigmoidDecay(args.generator_pretrain_scheduled_sampling_initial_rate,
-                                                   args.generator_pretrain_scheduled_sampling_k)
 
     train_summary_writer = tf.summary.create_file_writer(os.path.join(args.log_dir, "train"))
     val_summary_writer = tf.summary.create_file_writer(os.path.join(args.log_dir, "val"))
@@ -210,7 +188,7 @@ def pretrain_generator(args, dataset_manager):
 
     for train_batch in tqdm(train_dataset, desc="Batch", unit="batch"):
         global_step.assign_add(1)
-        teacher_forcing_rate = teacher_forcing_schedule(global_step)
+        teacher_forcing_rate = args.teacher_forcing_schedule(global_step)
         loss = generator_train_batch_mle(train_batch, generator, loss_fn, optimizer,
                                          args.generator_pretrain_dsa_lambda, teacher_forcing_rate)
         if global_step % args.generator_pretrain_logging_steps == 0:
