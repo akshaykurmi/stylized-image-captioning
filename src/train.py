@@ -217,7 +217,6 @@ def pretrain_generator(args, dataset_manager):
             with train_summary_writer.as_default(), tf.name_scope("generator_pretraining"):
                 tf.summary.scalar("crossentropy_loss", loss, step=global_step)
                 tf.summary.scalar("teacher_forcing_rate", teacher_forcing_rate, step=global_step)
-        # TODO: Calculate validation loss initially?
         if global_step % args.generator_pretrain_validate_steps == 0:
             logger.info("-- Calculating validation loss")
             losses = [generator_loss_mle(val_batch, generator, loss_fn, args.generator_pretrain_dsa_lambda)
@@ -282,7 +281,6 @@ def pretrain_discriminator(args, dataset_manager):
         if global_step % args.discriminator_pretrain_logging_steps == 0:
             with train_summary_writer.as_default(), tf.name_scope("discriminator_pretraining"):
                 tf.summary.scalar("crossentropy_loss", loss, step=global_step)
-        # TODO: Calculate validation loss initially?
         if global_step % args.discriminator_pretrain_validate_steps == 0:
             logger.info("-- Calculating validation loss")
             losses = []
@@ -395,7 +393,6 @@ def adversarially_train_generator_and_discriminator(args, dataset_manager):
         if round_ % args.adversarial_checkpoint_rounds:
             checkpoint_manager.save(["generator", "discriminator", "adversarial_params"])
 
-        # TODO: Calculate validation loss initially?
         if round_ % args.adversarial_validate_rounds == 0:
             logger.info("-- Calculating generator validation loss")
             generator_losses = defaultdict(list)
