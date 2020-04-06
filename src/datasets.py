@@ -122,7 +122,7 @@ class DatasetManager:
             tf.convert_to_tensor([d["additional_captions"] for d in data], dtype=tf.string)
         ))
         tf_dataset = tf_dataset.map(
-            lambda i, c, s, ac: (self.load_image(i), c, s, ac),
+            lambda i, c, s, ac: (tf.py_function(self.load_image, (i,), tf.float32), c, s, ac),
             num_parallel_calls=tf.data.experimental.AUTOTUNE
         )
         tf_dataset = tf_dataset.batch(batch_size)
@@ -157,12 +157,22 @@ class DatasetManager:
         return encoder(image_batch)
 
     @staticmethod
-    @tf.function
     def load_image(image_path):
         img = tf.io.read_file(image_path)
         img = tf.image.decode_jpeg(img, channels=3)
-        img = tf.cast(img, dtype=tf.float32)
-        return tf.image.resize(img, [299, 299])
+        width, height = img.shape[0], img.shape[1]
+        if width > height:
+            left = int((width - height) / 2)
+            right = width - left
+            top = 0
+            bottom = height
+        else:
+            top = int((height - width) / 2)
+            bottom = height - top
+            left = 0
+            right = width
+        img = img[left:right, top:bottom]
+        return tf.image.resize(img, [299, 299], method="bilinear", antialias=True)
 
     @staticmethod
     def _serialize_example(image, caption, style, additional_captions):
