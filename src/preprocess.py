@@ -2,6 +2,7 @@ import string
 from collections import Counter
 
 import re
+from unidecode import unidecode
 import tensorflow as tf
 
 
@@ -29,9 +30,12 @@ class Tokenizer:
         return self.token_2_index[self.pad]
 
     def preprocess(self, text):
-        t = text.lower()
+        t = unidecode(text)
+        t = t.lower()
+        t = re.sub(r"[.]+", r".", t)
         t = re.sub(f"([{string.punctuation}])", r" \1 ", t)
-        t = re.sub(r"[^a-zA-Z.?!,;'\"]+", r" ", t)
+        t = re.sub(r" [\d]+ ", r" xxxxx ", t)
+        t = re.sub(r"[^a-zA-Z.?!]+", r" ", t)
         t = re.sub(r"\s+", r" ", t)
         t = t.strip()
         t = f"{self.start} {t} {self.end}"
