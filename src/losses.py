@@ -16,10 +16,12 @@ class GeneratorMLELoss:
 class PolicyGradientLoss:
     def __call__(self, captions, logits, rewards):
         probabilities = tf.nn.softmax(logits)
+        mask = tf.cast(tf.sign(tf.abs(captions)), tf.float32)
         probabilities = tf.reshape(probabilities, shape=(-1, probabilities.shape[-1]))
         captions = tf.reshape(captions, shape=(-1,))
         rewards = tf.reshape(rewards, shape=(-1,))
+        mask = tf.reshape(mask, shape=(-1,))
         indices = tf.stack([tf.range(captions.shape[0], dtype=tf.int64), captions], axis=1)
         probabilities = tf.gather_nd(probabilities, indices)
-        loss = -tf.reduce_sum(tf.math.log(probabilities) * rewards)
+        loss = -tf.reduce_sum(tf.math.log(probabilities) * rewards * mask)
         return loss
