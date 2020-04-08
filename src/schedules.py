@@ -1,8 +1,46 @@
 import tensorflow as tf
 
 
-class InverseSigmoidDecay(tf.optimizers.schedules.LearningRateSchedule):
-    def __init__(self, initial_rate, k, name="inverse_sigmoid_decay"):
+class ConstantSchedule(tf.optimizers.schedules.LearningRateSchedule):
+    def __init__(self, rate, name="constant_schedule"):
+        super().__init__()
+        self.rate = rate
+        self.name = name
+
+    def __call__(self, step):
+        with tf.name_scope(self.name):
+            return self.rate
+
+    def get_config(self):
+        return {
+            "rate": self.rate,
+            "name": self.name
+        }
+
+
+class LinearSchedule(tf.optimizers.schedules.LearningRateSchedule):
+    def __init__(self, epsilon, k, c, name="linear_schedule"):
+        super().__init__()
+        self.epsilon = epsilon
+        self.k = k
+        self.c = c
+        self.name = name
+
+    def __call__(self, step):
+        with tf.name_scope(self.name):
+            return tf.math.maximum(self.epsilon, (self.k - self.c * step))
+
+    def get_config(self):
+        return {
+            "epsilon": self.epsilon,
+            "k": self.k,
+            "c": self.c,
+            "name": self.name
+        }
+
+
+class InverseSigmoidSchedule(tf.optimizers.schedules.LearningRateSchedule):
+    def __init__(self, initial_rate, k, name="inverse_sigmoid_schedule"):
         super().__init__()
         self.initial_rate = initial_rate
         self.k = k
@@ -17,22 +55,5 @@ class InverseSigmoidDecay(tf.optimizers.schedules.LearningRateSchedule):
         return {
             "initial_rate": self.initial_rate,
             "k": self.k,
-            "name": self.name
-        }
-
-
-class Constant(tf.optimizers.schedules.LearningRateSchedule):
-    def __init__(self, rate, name="constant"):
-        super().__init__()
-        self.rate = rate
-        self.name = name
-
-    def __call__(self, step):
-        with tf.name_scope(self.name):
-            return self.rate
-
-    def get_config(self):
-        return {
-            "rate": self.rate,
             "name": self.name
         }
