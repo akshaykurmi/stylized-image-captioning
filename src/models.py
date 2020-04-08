@@ -263,12 +263,15 @@ class Discriminator(tf.keras.Model):
         super().__init__()
         self.stylize = stylize
         self.pooling = tf.keras.layers.GlobalAveragePooling2D()
-        self.token_embedding = tf.keras.layers.Embedding(input_dim=token_vocab_size, output_dim=token_embedding_units)
+        self.token_embedding = tf.keras.layers.Embedding(input_dim=token_vocab_size, output_dim=token_embedding_units,
+                                                         mask_zero=True)
         self.style_embedding = tf.keras.layers.Embedding(input_dim=style_vocab_size, output_dim=style_embedding_units)
         self.lstm1 = tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(
-            units=lstm_units, activation="tanh", return_sequences=True
+            units=lstm_units, activation="tanh", return_sequences=True, dropout=0.2, recurrent_dropout=0.2
         ))
-        self.lstm2 = tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(units=lstm_units, activation="tanh"))
+        self.lstm2 = tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(
+            units=lstm_units, activation="tanh", dropout=0.2, recurrent_dropout=0.2
+        ))
         self.dense1 = tf.keras.layers.Dense(units=1024, activation="relu")
         self.dropout1 = tf.keras.layers.Dropout(rate=0.5)
         self.dense2 = tf.keras.layers.Dense(units=512, activation="relu")
@@ -279,8 +282,9 @@ class Discriminator(tf.keras.Model):
     def call(self, encoder_output, sequences, styles, training):
         encoder_output = self.pooling(encoder_output)
         token_embeddings = self.token_embedding(sequences)
-        lstm1_out = self.lstm1(token_embeddings)
-        lstm2_out = self.lstm2(lstm1_out)
+        mask = self.token_embedding.compute_mask(sequences)
+        lstm1_out = self.lstm1(token_embeddings, mask=mask, training=training)
+        lstm2_out = self.lstm2(lstm1_out, mask=mask, training=training)
         all_features = tf.concat([encoder_output, lstm2_out], axis=1)
         if self.stylize:
             style_embeddings = self.style_embedding(styles)
