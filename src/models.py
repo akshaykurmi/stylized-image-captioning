@@ -130,7 +130,7 @@ class Generator(tf.keras.Model):
         return (tf.transpose(logits.stack(), (1, 0, 2)),
                 tf.transpose(attention_alphas.stack(), (1, 0, 2)), sort_indices)
 
-    def sample(self, encoder_output, initial_sequence, styles, sequence_length, mode, n_samples, training, z=None):
+    def sample(self, encoder_output, initial_sequence, styles, sequence_length, mode, n_samples, training, eos, z=None):
         if mode not in ["stochastic", "deterministic"]:
             raise ValueError(f"Mode must be one of - stochastic, deterministic")
 
@@ -164,8 +164,14 @@ class Generator(tf.keras.Model):
                 else:
                     sequence.append(tfp.distributions.Categorical(logits=logits_t, dtype=tf.int64).sample())
                 logits.append(logits_t)
-            samples.append(tf.stack(sequence, axis=1))
-            sample_logits.append(tf.stack(logits, axis=1))
+            sequence = tf.stack(sequence, axis=1)
+            logits = tf.stack(logits, axis=1)
+            mask = self._get_mask(sequence, eos)
+            samples.append(sequence * tf.cast(mask, dtype=tf.int64))
+            sample_logits.append(logits * tf.cast(
+                tf.repeat(tf.expand_dims(mask, axis=2), self.token_vocab_size, axis=2),
+                dtype=tf.float32
+            ))
         return samples, sample_logits
 
     def beam_search(self, encoder_output, styles, sequence_length, beam_size, sos, z=None):
@@ -237,6 +243,18 @@ class Generator(tf.keras.Model):
     @staticmethod
     def _reshape_encoder_output(encoder_output):
         return tf.reshape(encoder_output, shape=(encoder_output.shape[0], -1, encoder_output.shape[3]))
+
+    @staticmethod
+    def _get_mask(sequence, eos):
+        batch_size, sequence_length = sequence.shape[0], sequence.shape[1]
+        mask = tf.tensor_scatter_nd_update(
+            sequence, tf.stack([tf.range(batch_size), tf.constant(sequence_length - 1, shape=(batch_size,))], axis=1),
+            tf.constant(eos, dtype=tf.int64, shape=(batch_size,))
+        )
+        mask = tf.broadcast_to(tf.expand_dims(tf.argmax(tf.cast(mask == eos, tf.int64), axis=1), axis=1),
+                               (batch_size, sequence_length))
+        mask = mask >= tf.broadcast_to(tf.range(sequence_length, dtype=tf.int64), (batch_size, sequence_length))
+        return mask
 
 
 class Discriminator(tf.keras.Model):

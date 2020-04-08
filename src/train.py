@@ -28,13 +28,14 @@ class MonteCarloRollout:
                 updated_weights.append(self.update_rate * other_w + (1 - self.update_rate) * self_w)
         self.generator.set_weights(updated_weights)
 
-    def calculate_rewards(self, encoder_output, captions, styles, discriminator, training):
+    def calculate_rewards(self, encoder_output, captions, styles, discriminator, tokenizer, training):
         sequence_length = captions.shape[1]
         rewards = []
         for t in range(1, sequence_length):
             initial_sequence = captions[:, :t]
             samples = self.generator.sample(encoder_output, initial_sequence, styles, sequence_length,
-                                            mode="stochastic", n_samples=self.n_rollouts, training=training)[0]
+                                            mode="stochastic", n_samples=self.n_rollouts, training=training,
+                                            eos=tokenizer.end_id)[0]
             rewards_t = tf.reduce_mean([
                 discriminator(encoder_output, s, styles, training=False) for s in samples
             ], axis=0)
@@ -52,9 +53,9 @@ def generator_train_batch_pg(batch, generator, discriminator, optimizer, loss_fn
         initial_sequence = tf.ones((batch_size, 1), dtype=tf.int64) * tokenizer.start_id
         captions, logits = generator.sample(encoder_output, initial_sequence, styles,
                                             sequence_length=max_seq_len, mode="stochastic", n_samples=1,
-                                            training=True)
+                                            training=True, eos=tokenizer.end_id)
         captions, logits = captions[0], logits[0]
-        rewards = rollout.calculate_rewards(encoder_output, captions, styles, discriminator, training=True)
+        rewards = rollout.calculate_rewards(encoder_output, captions, styles, discriminator, tokenizer, training=True)
         loss = loss_fn(captions, logits, rewards)
         gradients = tape.gradient(loss, generator.trainable_variables)
     optimizer.apply_gradients(zip(gradients, generator.trainable_variables))
@@ -67,9 +68,9 @@ def generator_loss_pg(batch, generator, discriminator, loss_fn, rollout, tokeniz
     batch_size = encoder_output.shape[0]
     initial_sequence = tf.ones((batch_size, 1), dtype=tf.int64) * tokenizer.start_id
     captions, logits = generator.sample(encoder_output, initial_sequence, styles, sequence_length=max_seq_len,
-                                        mode="stochastic", n_samples=1, training=False)
+                                        mode="stochastic", n_samples=1, training=False, eos=tokenizer.end_id)
     captions, logits = captions[0], logits[0]
-    rewards = rollout.calculate_rewards(encoder_output, captions, styles, discriminator, training=False)
+    rewards = rollout.calculate_rewards(encoder_output, captions, styles, discriminator, tokenizer, training=False)
     loss = loss_fn(captions, logits, rewards)
     return loss
 
@@ -140,7 +141,7 @@ def generate_fake_captions(true_batch, generator, tokenizer, max_seq_len):
     batch_size = encoder_output.shape[0]
     initial_sequence = tf.ones((batch_size, 1), dtype=tf.int64) * tokenizer.start_id
     captions = generator.sample(encoder_output, initial_sequence, styles, sequence_length=max_seq_len,
-                                mode="stochastic", n_samples=1, training=False)[0][0]
+                                mode="stochastic", n_samples=1, training=False, eos=tokenizer.end_id)[0][0]
     return encoder_output, captions, labels, sample_weights, styles
 
 
