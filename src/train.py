@@ -84,10 +84,11 @@ def generator_train_batch_mle(batch, generator, loss_fn, optimizer, dsa_lambda, 
                                                                    teacher_forcing_rate=teacher_forcing_rate,
                                                                    mode="stochastic", training=True)
         captions = tf.gather(captions, sort_indices)[:, 1:]
-        loss = loss_fn(captions, logits, attention_alphas, dsa_lambda)
+        nll_loss, dsa_loss = loss_fn(captions, logits, attention_alphas, dsa_lambda)
+        loss = nll_loss + dsa_loss
         gradients = tape.gradient(loss, generator.trainable_variables)
     optimizer.apply_gradients(zip(gradients, generator.trainable_variables))
-    return loss
+    return loss, nll_loss, dsa_loss
 
 
 @tf.function
@@ -97,8 +98,9 @@ def generator_loss_mle(batch, generator, loss_fn, dsa_lambda):
                                                                mode="stochastic", teacher_forcing_rate=0,
                                                                training=False)
     captions = tf.gather(captions, sort_indices)[:, 1:]
-    loss = loss_fn(captions, logits, attention_alphas, dsa_lambda)
-    return loss
+    nll_loss, dsa_loss = loss_fn(captions, logits, attention_alphas, dsa_lambda)
+    loss = nll_loss + dsa_loss
+    return loss, nll_loss, dsa_loss
 
 
 @tf.function
@@ -182,18 +184,23 @@ def pretrain_generator(args, dataset_manager):
     for train_batch in tqdm(train_dataset, desc="Batch", unit="batch"):
         global_step.assign_add(1)
         teacher_forcing_rate = args.teacher_forcing_schedule(global_step)
-        loss = generator_train_batch_mle(train_batch, generator, loss_fn, optimizer,
-                                         args.generator_pretrain_dsa_lambda, teacher_forcing_rate)
+        loss, nll_loss, dsa_loss = generator_train_batch_mle(train_batch, generator, loss_fn, optimizer,
+                                                             args.generator_pretrain_dsa_lambda, teacher_forcing_rate)
         if global_step % args.generator_pretrain_logging_steps == 0:
             with train_summary_writer.as_default(), tf.name_scope("generator_pretraining"):
-                tf.summary.scalar("crossentropy_loss", loss, step=global_step)
+                tf.summary.scalar("mle_loss", loss, step=global_step)
+                tf.summary.scalar("nll_loss", nll_loss, step=global_step)
+                tf.summary.scalar("dsa_loss", dsa_loss, step=global_step)
                 tf.summary.scalar("teacher_forcing_rate", teacher_forcing_rate, step=global_step)
         if global_step % args.generator_pretrain_validate_steps == 0:
             logger.info("-- Calculating validation loss")
             losses = [generator_loss_mle(val_batch, generator, loss_fn, args.generator_pretrain_dsa_lambda)
                       for val_batch in val_dataset]
+            losses = list(zip(*losses))
             with val_summary_writer.as_default(), tf.name_scope("generator_pretraining"):
-                tf.summary.scalar("crossentropy_loss", tf.reduce_mean(losses), step=global_step)
+                tf.summary.scalar("mle_loss", tf.reduce_mean(losses[0]), step=global_step)
+                tf.summary.scalar("nll_loss", tf.reduce_mean(losses[1]), step=global_step)
+                tf.summary.scalar("dsa_loss", tf.reduce_mean(losses[2]), step=global_step)
         if global_step % args.generator_pretrain_checkpoint_steps == 0:
             checkpoint_manager.save(["generator", "generator_pretrain_params"])
 
@@ -256,7 +263,7 @@ def pretrain_discriminator(args, dataset_manager):
                                              optimizer)
         if global_step % args.discriminator_pretrain_logging_steps == 0:
             with train_summary_writer.as_default(), tf.name_scope("discriminator_pretraining"):
-                tf.summary.scalar("crossentropy_loss", loss, step=global_step)
+                tf.summary.scalar("nll_loss", loss, step=global_step)
         if global_step % args.discriminator_pretrain_validate_steps == 0:
             logger.info("-- Calculating validation loss")
             losses = []
@@ -267,7 +274,7 @@ def pretrain_discriminator(args, dataset_manager):
                 losses.append(discriminator_loss_mle((val_true_batch, val_fake_batch, val_shuffled_batch),
                                                      discriminator, loss_fn))
             with val_summary_writer.as_default(), tf.name_scope("discriminator_pretraining"):
-                tf.summary.scalar("crossentropy_loss", tf.reduce_mean(losses), step=global_step)
+                tf.summary.scalar("nll_loss", tf.reduce_mean(losses), step=global_step)
         if global_step % args.discriminator_pretrain_checkpoint_steps == 0:
             checkpoint_manager.save(["discriminator", "discriminator_pretrain_params"])
 
@@ -357,7 +364,9 @@ def adversarially_train_generator_and_discriminator(args, dataset_manager):
                                               args.generator_adversarial_dsa_lambda)
                 with train_summary_writer.as_default(), tf.name_scope("generator_adversarial_training"):
                     tf.summary.scalar("policy_gradient_loss", pg_loss, step=generator_step)
-                    tf.summary.scalar("crossentropy_loss", mle_loss, step=generator_step)
+                    tf.summary.scalar("mle_loss", mle_loss[0], step=generator_step)
+                    tf.summary.scalar("nll_loss", mle_loss[1], step=generator_step)
+                    tf.summary.scalar("dsa_loss", mle_loss[2], step=generator_step)
 
         for _ in tqdm(range(args.adversarial_d_steps), desc="Training Discriminator", unit="batch"):
             discriminator_step.assign_add(1)
@@ -370,7 +379,7 @@ def adversarially_train_generator_and_discriminator(args, dataset_manager):
                                                  discriminator_loss_fn, discriminator_optimizer)
             if discriminator_step % args.discriminator_adversarial_logging_steps == 0:
                 with train_summary_writer.as_default(), tf.name_scope("discriminator_adversarial_training"):
-                    tf.summary.scalar("crossentropy_loss", loss, step=discriminator_step)
+                    tf.summary.scalar("nll_loss", loss, step=discriminator_step)
 
         rollout.update_weights(generator)
 
@@ -387,9 +396,12 @@ def adversarially_train_generator_and_discriminator(args, dataset_manager):
                 )
                 generator_losses["mle"].append(generator_loss_mle(val_batch, generator, generator_loss_fn_mle,
                                                                   args.generator_adversarial_dsa_lambda))
+            generator_losses["mle"] = list(zip(*generator_losses["mle"]))
             with val_summary_writer.as_default(), tf.name_scope("generator_adversarial_training"):
                 tf.summary.scalar("policy_gradient_loss", tf.reduce_mean(generator_losses["pg"]), step=generator_step)
-                tf.summary.scalar("crossentropy_loss", tf.reduce_mean(generator_losses["mle"]), step=generator_step)
+                tf.summary.scalar("mle_loss", tf.reduce_mean(generator_losses["mle"][0]), step=generator_step)
+                tf.summary.scalar("nll_loss", tf.reduce_mean(generator_losses["mle"][1]), step=generator_step)
+                tf.summary.scalar("dsa_loss", tf.reduce_mean(generator_losses["mle"][2]), step=generator_step)
 
             logger.info("-- Calculating discriminator validation loss")
             discriminator_losses = []
@@ -401,7 +413,7 @@ def adversarially_train_generator_and_discriminator(args, dataset_manager):
                 discriminator_losses.append(discriminator_loss_mle((val_true_batch, val_fake_batch, val_shuffled_batch),
                                                                    discriminator, discriminator_loss_fn))
             with val_summary_writer.as_default(), tf.name_scope("discriminator_adversarial_training"):
-                tf.summary.scalar("crossentropy_loss", tf.reduce_mean(discriminator_losses), step=discriminator_step)
+                tf.summary.scalar("nll_loss", tf.reduce_mean(discriminator_losses), step=discriminator_step)
 
     checkpoint_manager.save(["generator", "discriminator", "adversarial_params"])
     logger.info("***** Adversarially training Generator & Discriminator - Ended *****")

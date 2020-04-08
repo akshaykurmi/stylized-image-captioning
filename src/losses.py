@@ -8,9 +8,9 @@ class GeneratorMLELoss:
         loss *= mask
         loss = tf.reduce_sum(loss, axis=1)
         loss /= tf.reduce_sum(mask, axis=1)
-        loss = tf.reduce_mean(loss)
-        loss += dsa_lambda * tf.reduce_mean((1 - tf.reduce_sum(attention_alphas, axis=1)) ** 2)
-        return loss
+        nll_loss = tf.reduce_mean(loss)
+        dsa_loss = dsa_lambda * tf.reduce_mean((1 - tf.reduce_sum(attention_alphas, axis=1)) ** 2)
+        return nll_loss, dsa_loss
 
 
 class PolicyGradientLoss:
