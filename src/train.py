@@ -28,16 +28,18 @@ class MonteCarloRollout:
                 updated_weights.append(self.update_rate * other_w + (1 - self.update_rate) * self_w)
         self.generator.set_weights(updated_weights)
 
-    def calculate_rewards(self, encoder_output, captions, discriminator, training):
+    def calculate_rewards(self, encoder_output, captions, styles, discriminator, training):
         sequence_length = captions.shape[1]
         rewards = []
         for t in range(1, sequence_length):
             initial_sequence = captions[:, :t]
-            samples = self.generator.sample(encoder_output, initial_sequence, sequence_length,
+            samples = self.generator.sample(encoder_output, initial_sequence, styles, sequence_length,
                                             mode="stochastic", n_samples=self.n_rollouts, training=training)[0]
-            rewards_t = tf.reduce_mean([discriminator(encoder_output, s) for s in samples], axis=0)
+            rewards_t = tf.reduce_mean([
+                discriminator(encoder_output, s, styles, training=False) for s in samples
+            ], axis=0)
             rewards.append(rewards_t)
-        rewards.append(discriminator(encoder_output, captions))
+        rewards.append(discriminator(encoder_output, captions, styles, training=False))
         return tf.squeeze(tf.stack(rewards, axis=1))
 
 
@@ -45,14 +47,15 @@ class MonteCarloRollout:
 def generator_train_batch_pg(batch, generator, discriminator, optimizer, loss_fn, rollout, tokenizer, max_seq_len):
     with tf.GradientTape(watch_accessed_variables=False) as tape:
         tape.watch(generator.trainable_variables)
-        encoder_output = batch[0]
+        encoder_output, styles = batch[0], batch[2]
         batch_size = encoder_output.shape[0]
         initial_sequence = tf.ones((batch_size, 1), dtype=tf.int64) * tokenizer.start_id
-        captions, probabilities = generator.sample(encoder_output, initial_sequence, sequence_length=max_seq_len,
-                                                   mode="stochastic", n_samples=1, training=True)
-        captions, probabilities = captions[0], probabilities[0]
-        rewards = rollout.calculate_rewards(encoder_output, captions, discriminator, training=True)
-        loss = loss_fn(captions, probabilities, rewards)
+        captions, logits = generator.sample(encoder_output, initial_sequence, styles,
+                                            sequence_length=max_seq_len, mode="stochastic", n_samples=1,
+                                            training=True)
+        captions, logits = captions[0], logits[0]
+        rewards = rollout.calculate_rewards(encoder_output, captions, styles, discriminator, training=True)
+        loss = loss_fn(captions, logits, rewards)
         gradients = tape.gradient(loss, generator.trainable_variables)
     optimizer.apply_gradients(zip(gradients, generator.trainable_variables))
     return loss
@@ -60,14 +63,14 @@ def generator_train_batch_pg(batch, generator, discriminator, optimizer, loss_fn
 
 @tf.function
 def generator_loss_pg(batch, generator, discriminator, loss_fn, rollout, tokenizer, max_seq_len):
-    encoder_output = batch[0]
+    encoder_output, styles = batch[0], batch[2]
     batch_size = encoder_output.shape[0]
     initial_sequence = tf.ones((batch_size, 1), dtype=tf.int64) * tokenizer.start_id
-    captions, probabilities = generator.sample(encoder_output, initial_sequence, sequence_length=max_seq_len,
-                                               mode="stochastic", n_samples=1, training=False)
-    captions, probabilities = captions[0], probabilities[0]
-    rewards = rollout.calculate_rewards(encoder_output, captions, discriminator, training=False)
-    loss = loss_fn(captions, probabilities, rewards)
+    captions, logits = generator.sample(encoder_output, initial_sequence, styles, sequence_length=max_seq_len,
+                                        mode="stochastic", n_samples=1, training=False)
+    captions, logits = captions[0], logits[0]
+    rewards = rollout.calculate_rewards(encoder_output, captions, styles, discriminator, training=False)
+    loss = loss_fn(captions, logits, rewards)
     return loss
 
 
@@ -75,12 +78,12 @@ def generator_loss_pg(batch, generator, discriminator, loss_fn, rollout, tokeniz
 def generator_train_batch_mle(batch, generator, loss_fn, optimizer, dsa_lambda, teacher_forcing_rate):
     with tf.GradientTape(watch_accessed_variables=False) as tape:
         tape.watch(generator.trainable_variables)
-        encoder_output, captions = batch
-        predictions, attention_alphas, sort_indices = generator.forward(encoder_output, captions, mode="stochastic",
-                                                                        teacher_forcing_rate=teacher_forcing_rate,
-                                                                        training=True)
+        encoder_output, captions, styles = batch[0], batch[1], batch[2]
+        logits, attention_alphas, sort_indices = generator.forward(encoder_output, captions, styles,
+                                                                   teacher_forcing_rate=teacher_forcing_rate,
+                                                                   mode="stochastic", training=True)
         captions = tf.gather(captions, sort_indices)[:, 1:]
-        loss = loss_fn(captions, predictions, attention_alphas, dsa_lambda)
+        loss = loss_fn(captions, logits, attention_alphas, dsa_lambda)
         gradients = tape.gradient(loss, generator.trainable_variables)
     optimizer.apply_gradients(zip(gradients, generator.trainable_variables))
     return loss
@@ -88,11 +91,12 @@ def generator_train_batch_mle(batch, generator, loss_fn, optimizer, dsa_lambda, 
 
 @tf.function
 def generator_loss_mle(batch, generator, loss_fn, dsa_lambda):
-    encoder_output, captions = batch
-    predictions, attention_alphas, sort_indices = generator.forward(encoder_output, captions, mode="stochastic",
-                                                                    teacher_forcing_rate=0, training=False)
+    encoder_output, captions, styles = batch[0], batch[1], batch[2]
+    logits, attention_alphas, sort_indices = generator.forward(encoder_output, captions, styles,
+                                                               mode="stochastic", teacher_forcing_rate=0,
+                                                               training=False)
     captions = tf.gather(captions, sort_indices)[:, 1:]
-    loss = loss_fn(captions, predictions, attention_alphas, dsa_lambda)
+    loss = loss_fn(captions, logits, attention_alphas, dsa_lambda)
     return loss
 
 
@@ -103,11 +107,12 @@ def discriminator_train_batch_mle(batches, discriminator, loss_fn, optimizer):
         encoder_output = tf.concat([b[0] for b in batches], axis=0)
         labels = tf.concat([b[2] for b in batches], axis=0)
         sample_weight = tf.concat([b[3] for b in batches], axis=0)
+        styles = tf.concat([b[4] for b in batches], axis=0)
         captions = [b[1] for b in batches]
         max_caption_length = max([c.shape[1] for c in captions])
         captions = [tf.pad(c, paddings=tf.constant([[0, 0], [0, max_caption_length - c.shape[1]]])) for c in captions]
         captions = tf.concat(captions, axis=0)
-        predictions = discriminator(encoder_output, captions, training=True)
+        predictions = discriminator(encoder_output, captions, styles, training=True)
         loss = loss_fn(labels, predictions, sample_weight=sample_weight)
         gradients = tape.gradient(loss, discriminator.trainable_variables)
     optimizer.apply_gradients(zip(gradients, discriminator.trainable_variables))
@@ -119,23 +124,24 @@ def discriminator_loss_mle(batches, discriminator, loss_fn):
     encoder_output = tf.concat([b[0] for b in batches], axis=0)
     labels = tf.concat([b[2] for b in batches], axis=0)
     sample_weight = tf.concat([b[3] for b in batches], axis=0)
+    styles = tf.concat([b[4] for b in batches], axis=0)
     captions = [b[1] for b in batches]
     max_caption_length = max([c.shape[1] for c in captions])
     captions = [tf.pad(c, paddings=tf.constant([[0, 0], [0, max_caption_length - c.shape[1]]])) for c in captions]
     captions = tf.concat(captions, axis=0)
-    predictions = discriminator(encoder_output, captions)
+    predictions = discriminator(encoder_output, captions, styles, training=False)
     loss = loss_fn(labels, predictions, sample_weight=sample_weight)
     return loss
 
 
 @tf.function
 def generate_fake_captions(true_batch, generator, tokenizer, max_seq_len):
-    encoder_output, labels, sample_weights = true_batch[0], true_batch[2], true_batch[3]
+    encoder_output, labels, sample_weights, styles = true_batch[0], true_batch[2], true_batch[3], true_batch[4]
     batch_size = encoder_output.shape[0]
     initial_sequence = tf.ones((batch_size, 1), dtype=tf.int64) * tokenizer.start_id
-    captions = generator.sample(encoder_output, initial_sequence, sequence_length=max_seq_len,
+    captions = generator.sample(encoder_output, initial_sequence, styles, sequence_length=max_seq_len,
                                 mode="stochastic", n_samples=1, training=False)[0][0]
-    return encoder_output, captions, labels, sample_weights
+    return encoder_output, captions, labels, sample_weights, styles
 
 
 def pretrain_generator(args, dataset_manager):
@@ -144,10 +150,13 @@ def pretrain_generator(args, dataset_manager):
     set_seed(args.seed)
 
     logger.info("-- Initializing")
-    generator = Generator(vocab_size=dataset_manager.tokenizer.vocab_size, lstm_units=args.generator_lstm_units,
-                          embedding_units=args.generator_embedding_units, lstm_dropout=args.generator_lstm_dropout,
+    generator = Generator(token_vocab_size=dataset_manager.tokenizer.vocab_size,
+                          style_vocab_size=dataset_manager.style_encoder.num_classes,
+                          style_embedding_units=args.generator_style_embedding_units,
+                          token_embedding_units=args.generator_token_embedding_units,
+                          lstm_units=args.generator_lstm_units, lstm_dropout=args.generator_lstm_dropout,
                           attention_units=args.generator_attention_units, encoder_units=args.generator_encoder_units,
-                          z_units=args.generator_z_units)
+                          z_units=args.generator_z_units, stylize=args.stylize)
 
     loss_fn = GeneratorMLELoss()
     optimizer = tf.keras.optimizers.Adam(learning_rate=args.generator_pretrain_learning_rate,
@@ -197,13 +206,18 @@ def pretrain_discriminator(args, dataset_manager):
     set_seed(args.seed)
 
     logger.info("-- Initializing")
-    generator = Generator(vocab_size=dataset_manager.tokenizer.vocab_size, lstm_units=args.generator_lstm_units,
-                          embedding_units=args.generator_embedding_units, lstm_dropout=args.generator_lstm_dropout,
+    generator = Generator(token_vocab_size=dataset_manager.tokenizer.vocab_size,
+                          style_vocab_size=dataset_manager.style_encoder.num_classes,
+                          style_embedding_units=args.generator_style_embedding_units,
+                          token_embedding_units=args.generator_token_embedding_units,
+                          lstm_units=args.generator_lstm_units, lstm_dropout=args.generator_lstm_dropout,
                           attention_units=args.generator_attention_units, encoder_units=args.generator_encoder_units,
-                          z_units=args.generator_z_units)
-    discriminator = Discriminator(vocab_size=dataset_manager.tokenizer.vocab_size,
-                                  embedding_units=args.discriminator_embedding_units,
-                                  lstm_units=args.discriminator_lstm_units)
+                          z_units=args.generator_z_units, stylize=args.stylize)
+    discriminator = Discriminator(token_vocab_size=dataset_manager.tokenizer.vocab_size,
+                                  style_vocab_size=dataset_manager.style_encoder.num_classes,
+                                  token_embedding_units=args.discriminator_token_embedding_units,
+                                  style_embedding_units=args.discriminator_style_embedding_units,
+                                  lstm_units=args.discriminator_lstm_units, stylize=args.stylize)
 
     loss_fn = tf.keras.losses.BinaryCrossentropy()
     optimizer = tf.keras.optimizers.Adam(learning_rate=args.discriminator_pretrain_learning_rate,
@@ -266,17 +280,25 @@ def adversarially_train_generator_and_discriminator(args, dataset_manager):
     set_seed(args.seed)
 
     logger.info("-- Initializing")
-    generator = Generator(vocab_size=dataset_manager.tokenizer.vocab_size, lstm_units=args.generator_lstm_units,
-                          embedding_units=args.generator_embedding_units, lstm_dropout=args.generator_lstm_dropout,
+    generator = Generator(token_vocab_size=dataset_manager.tokenizer.vocab_size,
+                          style_vocab_size=dataset_manager.style_encoder.num_classes,
+                          style_embedding_units=args.generator_style_embedding_units,
+                          token_embedding_units=args.generator_token_embedding_units,
+                          lstm_units=args.generator_lstm_units, lstm_dropout=args.generator_lstm_dropout,
                           attention_units=args.generator_attention_units, encoder_units=args.generator_encoder_units,
-                          z_units=args.generator_z_units)
-    generator_mc = Generator(vocab_size=dataset_manager.tokenizer.vocab_size, lstm_units=args.generator_lstm_units,
-                             embedding_units=args.generator_embedding_units, lstm_dropout=args.generator_lstm_dropout,
+                          z_units=args.generator_z_units, stylize=args.stylize)
+    generator_mc = Generator(token_vocab_size=dataset_manager.tokenizer.vocab_size,
+                             style_vocab_size=dataset_manager.style_encoder.num_classes,
+                             style_embedding_units=args.generator_style_embedding_units,
+                             token_embedding_units=args.generator_token_embedding_units,
+                             lstm_units=args.generator_lstm_units, lstm_dropout=args.generator_lstm_dropout,
                              attention_units=args.generator_attention_units, encoder_units=args.generator_encoder_units,
-                             z_units=args.generator_z_units)
-    discriminator = Discriminator(vocab_size=dataset_manager.tokenizer.vocab_size,
-                                  embedding_units=args.discriminator_embedding_units,
-                                  lstm_units=args.discriminator_lstm_units)
+                             z_units=args.generator_z_units, stylize=args.stylize)
+    discriminator = Discriminator(token_vocab_size=dataset_manager.tokenizer.vocab_size,
+                                  style_vocab_size=dataset_manager.style_encoder.num_classes,
+                                  token_embedding_units=args.discriminator_token_embedding_units,
+                                  style_embedding_units=args.discriminator_style_embedding_units,
+                                  lstm_units=args.discriminator_lstm_units, stylize=args.stylize)
     rollout = MonteCarloRollout(generator_mc, args.adversarial_rollout_n, args.adversarial_rollout_update_rate)
     rollout.update_weights(generator)
 

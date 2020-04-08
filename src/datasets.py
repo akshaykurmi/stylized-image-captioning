@@ -11,7 +11,7 @@ import tensorflow as tf
 from tqdm import tqdm
 
 from .models import Encoder
-from .preprocess import Tokenizer
+from .preprocess import Tokenizer, LabelEncoder
 
 logger = logging.getLogger(__name__)
 
@@ -79,35 +79,47 @@ class DatasetManager:
         self.dataset = dataset
         self.max_seq_len = max_seq_len
         self.tokenizer = Tokenizer()
+        self.style_encoder = LabelEncoder()
         self.tokenizer.fit_on_texts([d["caption"] for d in self.dataset.load("train")])
+        self.style_encoder.fit_on_labels([d["style"] for d in self.dataset.load("train")])
 
     def load_generator_dataset(self, split, batch_size, repeat):
         tf_dataset = self._load_cached_dataset(split)
-        tf_dataset = tf_dataset.map(lambda i, c, s, ac: (
-            i, tf.py_function(self.tokenizer.text_to_sequence, (c, self.max_seq_len), tf.int64)
-        ), num_parallel_calls=tf.data.experimental.AUTOTUNE)
         tf_dataset = tf_dataset.shuffle(buffer_size=1000)
-        tf_dataset = tf_dataset.padded_batch(batch_size, padded_shapes=([10, 10, 2048], [None]))
+        if split == "test":
+            tf_dataset = tf_dataset.map(lambda i, c, s, ac: (
+                i, tf.py_function(self.tokenizer.text_to_sequence, (c, self.max_seq_len), tf.int64),
+                tf.py_function(self.style_encoder.transform, (s,), tf.int32),
+                tf.py_function(self.tokenizer.texts_to_sequences, (ac, self.max_seq_len), tf.int64)
+            ), num_parallel_calls=tf.data.experimental.AUTOTUNE)
+            tf_dataset = tf_dataset.padded_batch(batch_size, padded_shapes=([10, 10, 2048], [None], [], [None, None]))
+        else:
+            tf_dataset = tf_dataset.map(lambda i, c, s, ac: (
+                i, tf.py_function(self.tokenizer.text_to_sequence, (c, self.max_seq_len), tf.int64),
+                tf.py_function(self.style_encoder.transform, (s,), tf.int32)
+            ), num_parallel_calls=tf.data.experimental.AUTOTUNE)
+            tf_dataset = tf_dataset.padded_batch(batch_size, padded_shapes=([10, 10, 2048], [None], []))
         tf_dataset = tf_dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
         tf_dataset = tf_dataset.repeat(repeat)
         return tf_dataset
 
     def load_discriminator_dataset(self, split, batch_size, repeat, label, sample_weight, randomize_captions):
         tf_dataset = self._load_cached_dataset(split)
-        tf_dataset = tf_dataset.map(lambda i, c, s, ac: (i, c), num_parallel_calls=tf.data.experimental.AUTOTUNE)
+        tf_dataset = tf_dataset.map(lambda i, c, s, ac: (i, c, s), num_parallel_calls=tf.data.experimental.AUTOTUNE)
         if randomize_captions:
             captions = [d["caption"] for d in self.dataset.load(split)]
             randomized_captions_dataset = tf.data.Dataset.from_tensor_slices((
                 tf.convert_to_tensor(captions, dtype=tf.string)
             )).shuffle(buffer_size=len(captions))
             tf_dataset = tf.data.Dataset.zip((tf_dataset, randomized_captions_dataset))
-            tf_dataset = tf_dataset.map(lambda i_c, rc: (i_c[0], rc))
-        tf_dataset = tf_dataset.map(lambda i, c: (
+            tf_dataset = tf_dataset.map(lambda i_c_s, rc: (i_c_s[0], rc, i_c_s[2]))
+        tf_dataset = tf_dataset.map(lambda i, c, s: (
             i, tf.py_function(self.tokenizer.text_to_sequence, (c, self.max_seq_len), tf.int64),
-            tf.constant(label, dtype=tf.int32, shape=(1,)), tf.constant(sample_weight, dtype=tf.float32, shape=(1,))
+            tf.constant(label, dtype=tf.int32, shape=(1,)), tf.constant(sample_weight, dtype=tf.float32, shape=(1,)),
+            tf.py_function(self.style_encoder.transform, (s,), tf.int32)
         ), num_parallel_calls=tf.data.experimental.AUTOTUNE)
         tf_dataset = tf_dataset.shuffle(buffer_size=1000)
-        tf_dataset = tf_dataset.padded_batch(batch_size, padded_shapes=([10, 10, 2048], [None], [None], [None]))
+        tf_dataset = tf_dataset.padded_batch(batch_size, padded_shapes=([10, 10, 2048], [None], [None], [None], []))
         tf_dataset = tf_dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
         tf_dataset = tf_dataset.repeat(repeat)
         return tf_dataset

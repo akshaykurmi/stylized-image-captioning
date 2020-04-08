@@ -2,8 +2,8 @@ import tensorflow as tf
 
 
 class GeneratorMLELoss:
-    def __call__(self, captions, predictions, attention_alphas, dsa_lambda):
-        loss = tf.nn.sparse_softmax_cross_entropy_with_logits(captions, predictions)
+    def __call__(self, captions, logits, attention_alphas, dsa_lambda):
+        loss = tf.nn.sparse_softmax_cross_entropy_with_logits(captions, logits)
         mask = tf.cast(tf.sign(tf.abs(captions)), tf.float32)
         loss *= mask
         loss = tf.reduce_sum(loss, axis=1)
@@ -14,7 +14,8 @@ class GeneratorMLELoss:
 
 
 class PolicyGradientLoss:
-    def __call__(self, captions, probabilities, rewards):
+    def __call__(self, captions, logits, rewards):
+        probabilities = tf.nn.softmax(logits)
         probabilities = tf.reshape(probabilities, shape=(-1, probabilities.shape[-1]))
         captions = tf.reshape(captions, shape=(-1,))
         rewards = tf.reshape(rewards, shape=(-1,))

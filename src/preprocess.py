@@ -55,6 +55,20 @@ class Tokenizer:
             sequence = sequence[:max_len]
         return tf.convert_to_tensor(sequence, dtype=tf.int64)
 
+    def texts_to_sequences(self, texts, max_len=None):
+        sequences = texts.numpy()
+        sequences = [sequence.decode("utf-8") for sequence in sequences]
+        sequences = [self.preprocess(sequence) for sequence in sequences]
+        sequences = list(map(
+            lambda sequence: list(map(
+                lambda token: self.token_2_index.get(token, self.token_2_index[self.unk]),
+                sequence)),
+            sequences))
+        if max_len is not None:
+            sequences = [sequence[:max_len] for sequence in sequences]
+        sequences = tf.keras.preprocessing.sequence.pad_sequences(sequences, padding="post", value=self.pad_id)
+        return tf.convert_to_tensor(sequences, dtype=tf.int64)
+
     def sequence_to_text(self, sequence):
         text = sequence.numpy()
         text = list(map(lambda index: self.index_2_token[index], text))
@@ -68,3 +82,25 @@ class Tokenizer:
         texts = list(map(lambda index: self.index_2_token[index], texts))
         texts = tf.convert_to_tensor(texts, dtype=tf.string)
         return tf.reshape(texts, initial_shape)
+
+
+class LabelEncoder:
+    def __init__(self):
+        self.label_to_index = {}
+        self.index_to_label = {}
+
+    @property
+    def num_classes(self):
+        return len(self.label_to_index)
+
+    def fit_on_labels(self, labels):
+        self.label_to_index = {}
+        self.index_to_label = {}
+        for index, label in enumerate(sorted(set(labels))):
+            self.label_to_index[label] = index
+            self.index_to_label[index] = label
+
+    def transform(self, label):
+        label = label.numpy().decode("utf-8")
+        index = self.label_to_index[label]
+        return tf.constant(index, dtype=tf.int32)

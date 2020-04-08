@@ -26,7 +26,8 @@ parser.add_argument("--run_adversarial_training", default=False, action="store_t
 parser.add_argument("--run_evaluation", default=False, action="store_true")
 
 parser.add_argument("--generate_captions_for_image", default=False, action="store_true")
-parser.add_argument("--image_path", type=str, default="")
+
+parser.add_argument("--stylize", default=False, action="store_true")
 
 args = parser.parse_args()
 
@@ -43,12 +44,14 @@ args.seed = 42
 args.max_seq_len = 20
 
 args.generator_encoder_units = 2048
-args.generator_embedding_units = 512
+args.generator_token_embedding_units = 512
+args.generator_style_embedding_units = 64
 args.generator_attention_units = 512
 args.generator_lstm_units = 512
 args.generator_z_units = 256
 args.generator_lstm_dropout = 0.5
-args.discriminator_embedding_units = 512
+args.discriminator_token_embedding_units = 512
+args.discriminator_style_embedding_units = 64
 args.discriminator_lstm_units = 512
 
 args.teacher_forcing_schedule = Constant(rate=0.0)
@@ -125,4 +128,4 @@ if args.run_evaluation:
     pass
 
 if args.generate_captions_for_image:
-    generate_captions_for_image(args, dataset_manager, args.image_path)
+    generate_captions_for_image(args, dataset_manager)
