@@ -6,7 +6,7 @@ import shutil
 
 from .datasets import PersonalityCaptions, DatasetManager
 from .evaluate import generate_captions_for_image
-from .schedules import LinearSchedule
+from .schedules import ExponentialSchedule
 from .train import pretrain_generator, pretrain_discriminator, adversarially_train_generator_and_discriminator
 from .utils import init_logging
 
@@ -54,7 +54,7 @@ args.discriminator_token_embedding_units = 512
 args.discriminator_style_embedding_units = 64
 args.discriminator_lstm_units = 512
 
-args.teacher_forcing_schedule = LinearSchedule(epsilon=0.01, k=1, c=0.000025)
+args.teacher_forcing_schedule = ExponentialSchedule(0.9999)
 args.generator_pretrain_learning_rate = 1e-4
 args.generator_pretrain_grad_clipvalue = 5.
 args.generator_pretrain_dsa_lambda = 1.0

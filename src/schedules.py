@@ -39,6 +39,23 @@ class LinearSchedule(tf.optimizers.schedules.LearningRateSchedule):
         }
 
 
+class ExponentialSchedule(tf.optimizers.schedules.LearningRateSchedule):
+    def __init__(self, k, name="exponential_schedule"):
+        super().__init__()
+        self.k = k
+        self.name = name
+
+    def __call__(self, step):
+        with tf.name_scope(self.name):
+            return tf.pow(self.k, step)
+
+    def get_config(self):
+        return {
+            "k": self.k,
+            "name": self.name
+        }
+
+
 class InverseSigmoidSchedule(tf.optimizers.schedules.LearningRateSchedule):
     def __init__(self, initial_rate, k, name="inverse_sigmoid_schedule"):
         super().__init__()
