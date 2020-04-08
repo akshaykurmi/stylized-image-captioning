@@ -28,7 +28,7 @@ class LinearSchedule(tf.optimizers.schedules.LearningRateSchedule):
 
     def __call__(self, step):
         with tf.name_scope(self.name):
-            return tf.math.maximum(self.epsilon, (self.k - self.c * step))
+            return tf.math.maximum(self.epsilon, (self.k - self.c * tf.cast(step, tf.float64)))
 
     def get_config(self):
         return {
