@@ -21,11 +21,11 @@ def generate_captions_for_image(args, dataset_manager):
     checkpoint_manager.restore_latest()
 
     image_path = input("Enter image path : ")
-    style_id = int(input("Enter style ID : "))
+    style = input("Enter style: ")
 
     image = dataset_manager.load_image(image_path)
     encoder_output = encoder(tf.expand_dims(image, axis=0))
-    style = tf.constant(style_id, dtype=tf.int32, shape=(1,))
+    style = tf.constant(dataset_manager.style_encoder.label_to_index[style], dtype=tf.int32, shape=(1,))
 
     sequences, sequences_logits = generator.beam_search(encoder_output, style, sequence_length=args.max_seq_len,
                                                         beam_size=5, sos=dataset_manager.tokenizer.start_id)
