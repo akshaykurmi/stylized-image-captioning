@@ -47,7 +47,7 @@ class ExponentialSchedule(tf.optimizers.schedules.LearningRateSchedule):
 
     def __call__(self, step):
         with tf.name_scope(self.name):
-            return tf.pow(self.k, step)
+            return tf.pow(self.k, tf.cast(step, tf.float64))
 
     def get_config(self):
         return {
