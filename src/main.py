@@ -5,7 +5,7 @@ import argparse
 import shutil
 
 from .datasets import PersonalityCaptions, DatasetManager
-from .evaluate import generate_captions_for_image
+from .evaluate import generate_captions_for_image, score_on_test_set
 from .schedules import ExponentialSchedule
 from .train import pretrain_generator, pretrain_discriminator, adversarially_train_generator_and_discriminator
 from .utils import init_logging
@@ -23,8 +23,9 @@ parser.add_argument("--run_cache_dataset", default=False, action="store_true")
 parser.add_argument("--run_generator_pretraining", default=False, action="store_true")
 parser.add_argument("--run_discriminator_pretraining", default=False, action="store_true")
 parser.add_argument("--run_adversarial_training", default=False, action="store_true")
-parser.add_argument("--run_evaluation", default=False, action="store_true")
 
+parser.add_argument("--run_evaluation", default=False, action="store_true")
+parser.add_argument("--checkpoints_to_evaluate", default="")
 parser.add_argument("--generate_captions_for_image", default=False, action="store_true")
 
 parser.add_argument("--stylize", default=False, action="store_true")
@@ -125,7 +126,8 @@ if args.run_adversarial_training:
     adversarially_train_generator_and_discriminator(args, dataset_manager)
 
 if args.run_evaluation:
-    pass
+    checkpoint_numbers = [int(c) for c in args.checkpoints_to_evaluate.split(",")]
+    score_on_test_set(args, dataset_manager, checkpoint_numbers)
 
 if args.generate_captions_for_image:
     generate_captions_for_image(args, dataset_manager)

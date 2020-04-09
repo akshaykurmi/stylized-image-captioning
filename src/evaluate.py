@@ -1,6 +1,11 @@
 import logging
 
 import tensorflow as tf
+from pycocoevalcap.bleu.bleu import Bleu
+from pycocoevalcap.cider.cider import Cider
+from pycocoevalcap.meteor.meteor import Meteor
+from pycocoevalcap.rouge.rouge import Rouge
+from pycocoevalcap.spice.spice import Spice
 
 from .models import Encoder, Generator
 from .utils import MultiCheckpointManager
@@ -45,6 +50,74 @@ def generate_captions_for_image(args, dataset_manager):
                                  training=False, eos=dataset_manager.tokenizer.end_id)[0]
     for seq in sequences:
         logger.info(f"Seq: {_seq_to_text(dataset_manager, seq.numpy()[0])}")
+
+
+def score_on_test_set(args, dataset_manager, checkpoint_numbers):
+    for checkpoint_number in checkpoint_numbers:
+        logger.info(f"-- Evaluating checkpoint {checkpoint_number}")
+        generator = Generator(token_vocab_size=dataset_manager.tokenizer.vocab_size,
+                              style_vocab_size=dataset_manager.style_encoder.num_classes,
+                              style_embedding_units=args.generator_style_embedding_units,
+                              token_embedding_units=args.generator_token_embedding_units,
+                              lstm_units=args.generator_lstm_units,
+                              lstm_dropout=args.generator_lstm_dropout,
+                              attention_units=args.generator_attention_units,
+                              encoder_units=args.generator_encoder_units,
+                              z_units=args.generator_z_units, stylize=args.stylize)
+        checkpoint_manager = MultiCheckpointManager(args.checkpoints_dir, {
+            "generator": {"generator": generator}
+        })
+        checkpoint_manager.restore({"generator": checkpoint_number})
+
+        num_test_samples = 10000
+        batch_size = 32
+        test_dataset = dataset_manager.load_generator_dataset("test", batch_size, 1)
+
+        ground_truths = {}
+        predictions = {}
+        sample_id = 0
+        logger.info("-- Generating predictions")
+        for batch in tqdm(test_dataset, desc="Batch", unit="batch", total=int(num_test_samples / batch_size) + 1):
+            encoder_output, caption, style, additional_captions = batch
+            sequences, sequences_logits = _run_beam_search(generator, encoder_output, style, 5, args.max_seq_len,
+                                                           dataset_manager.tokenizer.start_id,
+                                                           dataset_manager.tokenizer.end_id)
+            for s, c, acs in zip(sequences.numpy(), caption.numpy(), additional_captions.numpy()):
+                pred = _seq_to_text(dataset_manager, s[0])
+                gts = [_seq_to_text(dataset_manager, ac) for ac in acs]
+                gts.append(_seq_to_text(dataset_manager, c))
+                predictions[sample_id] = [pred]
+                ground_truths[sample_id] = gts
+                sample_id += 1
+
+        scorers = [
+            (Bleu(4), ["Bleu_1", "Bleu_2", "Bleu_3", "Bleu_4"]),
+            (Meteor(), "METEOR"),
+            (Rouge(), "ROUGE_L"),
+            (Cider(), "CIDEr"),
+            (Spice(), "SPICE")
+        ]
+
+        evaluation = {}
+        for scorer, method in scorers:
+            logger.info(f"-- Computing {scorer.method()} score")
+            score, scores = scorer.compute_score(ground_truths, predictions)
+            if type(method) == list:
+                for sc, scs, m in zip(score, scores, method):
+                    evaluation[m] = sc
+            else:
+                evaluation[method] = score
+        logger.info("========================================")
+        logger.info(f"-- Checkpoint Number - {checkpoint_number}")
+        for metric, score in evaluation.items():
+            logger.info(f"-- {metric}: {score:0.5f}")
+        logger.info("========================================")
+
+
+@tf.function
+def _run_beam_search(generator, encoder_output, style, beam_size, sequence_length, sos, eos):
+    return generator.beam_search(encoder_output, style, sequence_length=sequence_length,
+                                 beam_size=beam_size, sos=sos, eos=eos)
 
 
 def _seq_to_text(dataset_manager, seq):
