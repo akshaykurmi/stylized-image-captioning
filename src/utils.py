@@ -39,6 +39,11 @@ class MultiCheckpointManager:
             self.checkpoints[checkpoint_name] = checkpoint
             self.checkpoint_managers[checkpoint_name] = manager
 
+    def restore(self, checkpoint_names_and_numbers):
+        for checkpoint_name, checkpoint_number in checkpoint_names_and_numbers.items():
+            checkpoint_path = f"{self.checkpoint_managers[checkpoint_name]._checkpoint_prefix}-{checkpoint_number}"
+            self.checkpoints[checkpoint_name].restore(checkpoint_path)
+
     def restore_latest(self):
         for checkpoint_name in self.checkpoints.keys():
             self.checkpoints[checkpoint_name].restore(self.checkpoint_managers[checkpoint_name].latest_checkpoint)
