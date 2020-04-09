@@ -1,7 +1,11 @@
+import logging
+
 import tensorflow as tf
 
 from .models import Encoder, Generator
 from .utils import MultiCheckpointManager
+
+logger = logging.getLogger(__name__)
 
 
 def generate_captions_for_image(args, dataset_manager):
@@ -28,8 +32,21 @@ def generate_captions_for_image(args, dataset_manager):
     style = tf.constant(dataset_manager.style_encoder.label_to_index[style], dtype=tf.int32, shape=(1,))
 
     sequences, sequences_logits = generator.beam_search(encoder_output, style, sequence_length=args.max_seq_len,
-                                                        beam_size=5, sos=dataset_manager.tokenizer.start_id)
-    print("-- Sequences:")
-    print(dataset_manager.tokenizer.sequences_to_texts(sequences))
-    print("-- Sequence Probabilities:")
-    print(tf.math.exp(sequences_logits))
+                                                        beam_size=5, sos=dataset_manager.tokenizer.start_id,
+                                                        eos=dataset_manager.tokenizer.end_id)
+    logger.info("-- Beam Search")
+    for seq, logit in zip(sequences.numpy()[0], sequences_logits.numpy()[0]):
+        logger.info(f"Logit: {logit:0.5f} | Seq: {_seq_to_text(dataset_manager, seq)}")
+
+    logger.info("-- Random Sampling")
+    initial_sequence = tf.ones((1, 1), dtype=tf.int64) * dataset_manager.tokenizer.start_id
+    sequences = generator.sample(encoder_output, initial_sequence, style,
+                                 sequence_length=args.max_seq_len, mode="stochastic", n_samples=5,
+                                 training=False, eos=dataset_manager.tokenizer.end_id)[0]
+    for seq in sequences:
+        logger.info(f"Seq: {_seq_to_text(dataset_manager, seq.numpy()[0])}")
+
+
+def _seq_to_text(dataset_manager, seq):
+    text = dataset_manager.tokenizer.sequences_to_texts(seq[seq > 0]).numpy()
+    return " ".join([t.decode("utf-8") for t in text][1:-1])
