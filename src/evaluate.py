@@ -6,6 +6,7 @@ from pycocoevalcap.cider.cider import Cider
 from pycocoevalcap.meteor.meteor import Meteor
 from pycocoevalcap.rouge.rouge import Rouge
 from pycocoevalcap.spice.spice import Spice
+from tqdm import tqdm
 
 from .models import Encoder, Generator
 from .utils import MultiCheckpointManager
