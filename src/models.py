@@ -174,7 +174,7 @@ class Generator(tf.keras.Model):
             ))
         return samples, sample_logits
 
-    def beam_search(self, encoder_output, styles, sequence_length, beam_size, sos, z=None):
+    def beam_search(self, encoder_output, styles, sequence_length, beam_size, sos, eos, z=None):
         batch_size = encoder_output.shape[0]
 
         encoder_output = self._reshape_encoder_output(encoder_output)
@@ -225,6 +225,8 @@ class Generator(tf.keras.Model):
                 sequences_logits, tf.reshape(logits_l2, (-1, 1))
             ], axis=1)
 
+        mask = self._get_mask(sequences, eos)
+        sequences = sequences * tf.cast(mask, dtype=tf.int64)
         sequences = tf.reshape(sequences, (batch_size, beam_size, -1))
         sequences_logits = tf.reshape(sequences_logits[:, -1], (batch_size, beam_size))
         return sequences, sequences_logits
