@@ -27,6 +27,7 @@ parser.add_argument("--run_adversarial_training", default=False, action="store_t
 parser.add_argument("--run_evaluation", default=False, action="store_true")
 parser.add_argument("--checkpoints_to_evaluate", default="")
 parser.add_argument("--generate_captions_for_image", default=False, action="store_true")
+parser.add_argument("--checkpoint_to_generate_from", default="")
 
 parser.add_argument("--stylize", default=False, action="store_true")
 
@@ -130,4 +131,4 @@ if args.run_evaluation:
     score_on_test_set(args, dataset_manager, checkpoint_numbers)
 
 if args.generate_captions_for_image:
-    generate_captions_for_image(args, dataset_manager)
+    generate_captions_for_image(args, dataset_manager, int(args.checkpoint_to_generate_from))

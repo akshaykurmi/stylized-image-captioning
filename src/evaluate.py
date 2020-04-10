@@ -14,7 +14,7 @@ from .utils import MultiCheckpointManager
 logger = logging.getLogger(__name__)
 
 
-def generate_captions_for_image(args, dataset_manager):
+def generate_captions_for_image(args, dataset_manager, checkpoint_number):
     encoder = Encoder()
     generator = Generator(token_vocab_size=dataset_manager.tokenizer.vocab_size,
                           style_vocab_size=dataset_manager.style_encoder.num_classes,
@@ -28,7 +28,7 @@ def generate_captions_for_image(args, dataset_manager):
     checkpoint_manager = MultiCheckpointManager(args.checkpoints_dir, {
         "generator": {"generator": generator}
     })
-    checkpoint_manager.restore_latest()
+    checkpoint_manager.restore({"generator": checkpoint_number})
 
     image_path = input("Enter image path : ")
     style = input("Enter style: ")
