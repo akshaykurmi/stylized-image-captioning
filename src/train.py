@@ -44,7 +44,7 @@ class MonteCarloRollout:
         return tf.squeeze(tf.stack(rewards, axis=1))
 
 
-@tf.function
+# @tf.function
 def generator_train_batch_pg(batch, generator, discriminator, optimizer, loss_fn, rollout, tokenizer, max_seq_len):
     with tf.GradientTape(watch_accessed_variables=False) as tape:
         tape.watch(generator.trainable_variables)
@@ -62,7 +62,7 @@ def generator_train_batch_pg(batch, generator, discriminator, optimizer, loss_fn
     return loss, reward
 
 
-@tf.function
+# @tf.function
 def generator_loss_pg(batch, generator, discriminator, loss_fn, rollout, tokenizer, max_seq_len):
     encoder_output, styles = batch[0], batch[2]
     batch_size = encoder_output.shape[0]
