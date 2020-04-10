@@ -109,7 +109,7 @@ def score_on_test_set(args, dataset_manager, checkpoint_numbers):
             else:
                 evaluation[method] = score
         logger.info("========================================")
-        logger.info(f"-- Checkpoint Number - {checkpoint_number}")
+        logger.info(f"-- Run ID: {args.run_id} | Checkpoint Number: {checkpoint_number}")
         for metric, score in evaluation.items():
             logger.info(f"-- {metric}: {score:0.5f}")
         logger.info("========================================")
