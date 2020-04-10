@@ -56,10 +56,10 @@ def generator_train_batch_pg(batch, generator, discriminator, optimizer, loss_fn
                                             training=True, eos=tokenizer.end_id)
         captions, logits = captions[0], logits[0]
         rewards = rollout.calculate_rewards(encoder_output, captions, styles, discriminator, tokenizer, training=True)
-        loss = loss_fn(captions, logits, rewards)
+        loss, reward = loss_fn(captions, logits, rewards)
         gradients = tape.gradient(loss, generator.trainable_variables)
     optimizer.apply_gradients(zip(gradients, generator.trainable_variables))
-    return loss
+    return loss, reward
 
 
 @tf.function
@@ -71,8 +71,8 @@ def generator_loss_pg(batch, generator, discriminator, loss_fn, rollout, tokeniz
                                         mode="stochastic", n_samples=1, training=False, eos=tokenizer.end_id)
     captions, logits = captions[0], logits[0]
     rewards = rollout.calculate_rewards(encoder_output, captions, styles, discriminator, tokenizer, training=False)
-    loss = loss_fn(captions, logits, rewards)
-    return loss
+    loss, reward = loss_fn(captions, logits, rewards)
+    return loss, reward
 
 
 @tf.function
@@ -356,14 +356,15 @@ def adversarially_train_generator_and_discriminator(args, dataset_manager):
         for _ in tqdm(range(args.adversarial_g_steps), desc="Training Generator", unit="batch"):
             generator_step.assign_add(1)
             train_batch = next(generator_train_dataset)
-            pg_loss = generator_train_batch_pg(train_batch, generator, discriminator, generator_optimizer,
-                                               generator_loss_fn_pg, rollout, dataset_manager.tokenizer,
-                                               args.max_seq_len)
+            pg_loss, pg_reward = generator_train_batch_pg(train_batch, generator, discriminator, generator_optimizer,
+                                                          generator_loss_fn_pg, rollout, dataset_manager.tokenizer,
+                                                          args.max_seq_len)
             if generator_step % args.generator_adversarial_logging_steps == 0:
                 mle_loss = generator_loss_mle(train_batch, generator, generator_loss_fn_mle,
                                               args.generator_adversarial_dsa_lambda)
                 with train_summary_writer.as_default(), tf.name_scope("generator_adversarial_training"):
                     tf.summary.scalar("policy_gradient_loss", pg_loss, step=generator_step)
+                    tf.summary.scalar("policy_gradient_reward", pg_reward, step=generator_step)
                     tf.summary.scalar("mle_loss", mle_loss[0], step=generator_step)
                     tf.summary.scalar("nll_loss", mle_loss[1], step=generator_step)
                     tf.summary.scalar("dsa_loss", mle_loss[2], step=generator_step)
@@ -396,9 +397,11 @@ def adversarially_train_generator_and_discriminator(args, dataset_manager):
                 )
                 generator_losses["mle"].append(generator_loss_mle(val_batch, generator, generator_loss_fn_mle,
                                                                   args.generator_adversarial_dsa_lambda))
+            generator_losses["pg"] = list(zip(*generator_losses["pg"]))
             generator_losses["mle"] = list(zip(*generator_losses["mle"]))
             with val_summary_writer.as_default(), tf.name_scope("generator_adversarial_training"):
-                tf.summary.scalar("policy_gradient_loss", tf.reduce_mean(generator_losses["pg"]), step=generator_step)
+                tf.summary.scalar("policy_gradient_loss", tf.reduce_mean(generator_losses["pg"][0]), step=generator_step)
+                tf.summary.scalar("policy_gradient_reward", tf.reduce_mean(generator_losses["pg"][1]), step=generator_step)
                 tf.summary.scalar("mle_loss", tf.reduce_mean(generator_losses["mle"][0]), step=generator_step)
                 tf.summary.scalar("nll_loss", tf.reduce_mean(generator_losses["mle"][1]), step=generator_step)
                 tf.summary.scalar("dsa_loss", tf.reduce_mean(generator_losses["mle"][2]), step=generator_step)

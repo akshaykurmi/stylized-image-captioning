@@ -23,5 +23,7 @@ class PolicyGradientLoss:
         mask = tf.reshape(mask, shape=(-1,))
         indices = tf.stack([tf.range(captions.shape[0], dtype=tf.int64), captions], axis=1)
         probabilities = tf.gather_nd(probabilities, indices)
-        loss = -tf.reduce_sum(tf.math.log(probabilities) * rewards * mask)
-        return loss
+        rewards = rewards * mask
+        loss = -tf.reduce_sum(tf.math.log(probabilities) * rewards)
+        reward = tf.reduce_sum(rewards)
+        return loss, reward
