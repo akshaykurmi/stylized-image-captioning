@@ -20,13 +20,19 @@ class GeneratorMLELoss:
 class PolicyGradientLoss:
     def __call__(self, captions, logits, rewards):
         probabilities = tf.nn.softmax(logits)
+        mask = tf.cast(tf.sign(tf.abs(captions)), tf.float32)
+        sequence_lengths = tf.reduce_sum(mask, axis=1)
+        sequence_lengths = tf.broadcast_to(tf.expand_dims(tf.constant(sequence_lengths), axis=1), rewards.shape)
+        rewards = rewards - 0.5 * (1 / sequence_lengths)
+
         probabilities = tf.reshape(probabilities, shape=(-1, probabilities.shape[-1]))
         captions = tf.reshape(captions, shape=(-1,))
         rewards = tf.reshape(rewards, shape=(-1,))
+        mask = tf.reshape(mask, shape=(-1,))
         indices = tf.stack([tf.range(captions.shape[0], dtype=tf.int64), captions], axis=1)
         probabilities = tf.gather_nd(probabilities, indices)
 
-        mask = tf.cast(tf.sign(tf.abs(captions)), tf.bool)
+        mask = tf.cast(mask, tf.bool)
         probabilities = probabilities[mask]
         rewards = rewards[mask]
         mean_reward = tf.reduce_mean(rewards)
