@@ -61,18 +61,18 @@ args.generator_pretrain_grad_clipvalue = 5.
 args.generator_pretrain_dsa_lambda = 1.0
 args.generator_pretrain_batch_size = 64
 args.generator_pretrain_epochs = 20
-args.generator_pretrain_logging_steps = 1
+args.generator_pretrain_logging_steps = 20
 args.generator_pretrain_validate_steps = 1000
-args.generator_pretrain_checkpoint_steps = 50
+args.generator_pretrain_checkpoint_steps = 500
 
 args.discriminator_pretrain_learning_rate = 1e-4
 args.discriminator_pretrain_grad_clipvalue = 5.
 args.discriminator_pretrain_batch_size = 64
 args.discriminator_pretrain_neg_sample_weight = 0.5
 args.discriminator_pretrain_epochs = 10
-args.discriminator_pretrain_logging_steps = 1
+args.discriminator_pretrain_logging_steps = 20
 args.discriminator_pretrain_validate_steps = 1000
-args.discriminator_pretrain_checkpoint_steps = 50
+args.discriminator_pretrain_checkpoint_steps = 500
 
 args.generator_adversarial_learning_rate = 1e-4
 args.generator_adversarial_grad_clipvalue = 5.
