@@ -130,7 +130,8 @@ class Generator(tf.keras.Model):
         return (tf.transpose(logits.stack(), (1, 0, 2)),
                 tf.transpose(attention_alphas.stack(), (1, 0, 2)), sort_indices)
 
-    def sample(self, encoder_output, initial_sequence, styles, sequence_length, mode, n_samples, training, eos, z=None):
+    def sample(self, encoder_output, initial_sequence, styles, sequence_length, mode, n_samples, training,
+               sos, eos, z=None):
         if mode not in ["stochastic", "deterministic"]:
             raise ValueError(f"Mode must be one of - stochastic, deterministic")
 
@@ -166,6 +167,13 @@ class Generator(tf.keras.Model):
                 logits.append(logits_t)
             sequence = tf.stack(sequence, axis=1)
             logits = tf.stack(logits, axis=1)
+
+            oh = tf.expand_dims(tf.math.log(
+                tf.one_hot([sos] * logits.shape[0], depth=logits.shape[-1], dtype=tf.float32)
+            ), axis=1)
+            logits = tf.concat([oh, logits], axis=1)
+            logits = logits[:, :-1, :]
+
             mask = self._get_mask(sequence, eos)
             samples.append(sequence * tf.cast(mask, dtype=tf.int64))
             sample_logits.append(logits * tf.cast(

@@ -48,7 +48,8 @@ def generate_captions_for_image(args, dataset_manager):
     initial_sequence = tf.ones((1, 1), dtype=tf.int64) * dataset_manager.tokenizer.start_id
     sequences = generator.sample(encoder_output, initial_sequence, style,
                                  sequence_length=args.max_seq_len, mode="stochastic", n_samples=5,
-                                 training=False, eos=dataset_manager.tokenizer.end_id)[0]
+                                 training=False, sos=dataset_manager.tokenizer.start_id,
+                                 eos=dataset_manager.tokenizer.end_id)[0]
     for seq in sequences:
         logger.info(f"Seq: {_seq_to_text(dataset_manager, seq.numpy()[0])}")
 

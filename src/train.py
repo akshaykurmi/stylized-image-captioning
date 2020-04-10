@@ -35,7 +35,7 @@ class MonteCarloRollout:
             initial_sequence = captions[:, :t]
             samples = self.generator.sample(encoder_output, initial_sequence, styles, sequence_length,
                                             mode="stochastic", n_samples=self.n_rollouts, training=training,
-                                            eos=tokenizer.end_id)[0]
+                                            sos=tokenizer.start_id, eos=tokenizer.end_id)[0]
             rewards_t = tf.reduce_mean([
                 discriminator(encoder_output, s, styles, training=False) for s in samples
             ], axis=0)
@@ -53,7 +53,7 @@ def generator_train_batch_pg(batch, generator, discriminator, optimizer, loss_fn
         initial_sequence = tf.ones((batch_size, 1), dtype=tf.int64) * tokenizer.start_id
         captions, logits = generator.sample(encoder_output, initial_sequence, styles,
                                             sequence_length=max_seq_len, mode="stochastic", n_samples=1,
-                                            training=True, eos=tokenizer.end_id)
+                                            training=True, sos=tokenizer.start_id, eos=tokenizer.end_id)
         captions, logits = captions[0], logits[0]
         rewards = rollout.calculate_rewards(encoder_output, captions, styles, discriminator, tokenizer, training=True)
         loss, reward = loss_fn(captions, logits, rewards)
@@ -68,7 +68,8 @@ def generator_loss_pg(batch, generator, discriminator, loss_fn, rollout, tokeniz
     batch_size = encoder_output.shape[0]
     initial_sequence = tf.ones((batch_size, 1), dtype=tf.int64) * tokenizer.start_id
     captions, logits = generator.sample(encoder_output, initial_sequence, styles, sequence_length=max_seq_len,
-                                        mode="stochastic", n_samples=1, training=False, eos=tokenizer.end_id)
+                                        mode="stochastic", n_samples=1, training=False,
+                                        sos=tokenizer.start_id, eos=tokenizer.end_id)
     captions, logits = captions[0], logits[0]
     rewards = rollout.calculate_rewards(encoder_output, captions, styles, discriminator, tokenizer, training=False)
     loss, reward = loss_fn(captions, logits, rewards)
@@ -143,7 +144,8 @@ def generate_fake_captions(true_batch, generator, tokenizer, max_seq_len):
     batch_size = encoder_output.shape[0]
     initial_sequence = tf.ones((batch_size, 1), dtype=tf.int64) * tokenizer.start_id
     captions = generator.sample(encoder_output, initial_sequence, styles, sequence_length=max_seq_len,
-                                mode="stochastic", n_samples=1, training=False, eos=tokenizer.end_id)[0][0]
+                                mode="stochastic", n_samples=1, training=False,
+                                sos=tokenizer.start_id, eos=tokenizer.end_id)[0][0]
     return encoder_output, captions, labels, sample_weights, styles
 
 
@@ -400,8 +402,10 @@ def adversarially_train_generator_and_discriminator(args, dataset_manager):
             generator_losses["pg"] = list(zip(*generator_losses["pg"]))
             generator_losses["mle"] = list(zip(*generator_losses["mle"]))
             with val_summary_writer.as_default(), tf.name_scope("generator_adversarial_training"):
-                tf.summary.scalar("policy_gradient_loss", tf.reduce_mean(generator_losses["pg"][0]), step=generator_step)
-                tf.summary.scalar("policy_gradient_reward", tf.reduce_mean(generator_losses["pg"][1]), step=generator_step)
+                tf.summary.scalar("policy_gradient_loss", tf.reduce_mean(generator_losses["pg"][0]),
+                                  step=generator_step)
+                tf.summary.scalar("policy_gradient_reward", tf.reduce_mean(generator_losses["pg"][1]),
+                                  step=generator_step)
                 tf.summary.scalar("mle_loss", tf.reduce_mean(generator_losses["mle"][0]), step=generator_step)
                 tf.summary.scalar("nll_loss", tf.reduce_mean(generator_losses["mle"][1]), step=generator_step)
                 tf.summary.scalar("dsa_loss", tf.reduce_mean(generator_losses["mle"][2]), step=generator_step)

@@ -1,4 +1,8 @@
+import logging
+
 import tensorflow as tf
+
+logger = logging.getLogger(__name__)
 
 
 class GeneratorMLELoss:
@@ -24,6 +28,9 @@ class PolicyGradientLoss:
         indices = tf.stack([tf.range(captions.shape[0], dtype=tf.int64), captions], axis=1)
         probabilities = tf.gather_nd(probabilities, indices)
         rewards = rewards * mask
-        loss = -tf.reduce_sum(tf.math.log(probabilities) * rewards)
-        reward = tf.reduce_sum(rewards)
+        negative_log_likelihood = tf.math.negative(tf.math.log(probabilities))
+        weighted_negative_log_likelihood = tf.multiply(negative_log_likelihood, rewards)
+        non_zero = tf.math.count_nonzero(mask, dtype=tf.float32)
+        loss = tf.reduce_sum(weighted_negative_log_likelihood) / non_zero
+        reward = tf.reduce_sum(rewards) / non_zero
         return loss, reward
