@@ -5,7 +5,7 @@ import argparse
 import shutil
 
 from .datasets import PersonalityCaptions, DatasetManager
-from .evaluate import generate_captions_for_image, score_on_test_set
+from .evaluate import generate_captions_for_image, score_on_test_set, human_performance_on_test_set
 from .schedules import ExponentialSchedule
 from .train import pretrain_generator, pretrain_discriminator, adversarially_train_generator_and_discriminator
 from .utils import init_logging
@@ -24,6 +24,7 @@ parser.add_argument("--run_generator_pretraining", default=False, action="store_
 parser.add_argument("--run_discriminator_pretraining", default=False, action="store_true")
 parser.add_argument("--run_adversarial_training", default=False, action="store_true")
 
+parser.add_argument("--run_human_evaluation", default=False, action="store_true")
 parser.add_argument("--run_evaluation", default=False, action="store_true")
 parser.add_argument("--checkpoints_to_evaluate", default="")
 parser.add_argument("--generate_captions_for_image", default=False, action="store_true")
@@ -86,7 +87,7 @@ args.discriminator_adversarial_logging_steps = 1
 args.discriminator_adversarial_batch_size = 64
 args.discriminator_adversarial_neg_sample_weight = 0.5
 args.adversarial_rounds = 10000
-args.adversarial_validate_rounds = 10000
+args.adversarial_validate_rounds = 500
 args.adversarial_checkpoint_rounds = 5
 args.adversarial_g_steps = 1
 args.adversarial_d_steps = 5
@@ -129,6 +130,9 @@ if args.run_adversarial_training:
 if args.run_evaluation:
     checkpoint_numbers = [int(c) for c in args.checkpoints_to_evaluate.split(",")]
     score_on_test_set(args, dataset_manager, checkpoint_numbers)
+
+if args.run_human_evaluation:
+    human_performance_on_test_set(dataset_manager)
 
 if args.generate_captions_for_image:
     generate_captions_for_image(args, dataset_manager, int(args.checkpoint_to_generate_from))

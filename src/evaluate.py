@@ -92,28 +92,58 @@ def score_on_test_set(args, dataset_manager, checkpoint_numbers):
                 ground_truths[sample_id] = gts
                 sample_id += 1
 
-        scorers = [
-            (Bleu(4), ["Bleu_1", "Bleu_2", "Bleu_3", "Bleu_4"]),
-            (Meteor(), "METEOR"),
-            (Rouge(), "ROUGE_L"),
-            (Cider(), "CIDEr"),
-            (Spice(), "SPICE")
-        ]
-
-        evaluation = {}
-        for scorer, method in scorers:
-            logger.info(f"-- Computing {scorer.method()} score")
-            score, scores = scorer.compute_score(ground_truths, predictions)
-            if type(method) == list:
-                for sc, scs, m in zip(score, scores, method):
-                    evaluation[m] = sc
-            else:
-                evaluation[method] = score
+        scores = _compute_scores(ground_truths, predictions)
         logger.info("========================================")
         logger.info(f"-- Run ID: {args.run_id} | Checkpoint Number: {checkpoint_number}")
-        for metric, score in evaluation.items():
+        for metric, score in scores.items():
             logger.info(f"-- {metric}: {score:0.5f}")
         logger.info("========================================")
+
+
+def human_performance_on_test_set(dataset_manager):
+    num_test_samples = 10000
+    batch_size = 32
+    test_dataset = dataset_manager.load_generator_dataset("test", batch_size, 1)
+
+    ground_truths = {}
+    predictions = {}
+    sample_id = 0
+    logger.info("-- Generating predictions")
+    for batch in tqdm(test_dataset, desc="Batch", unit="batch", total=int(num_test_samples / batch_size) + 1):
+        encoder_output, caption, style, additional_captions = batch
+        for c, acs in zip(caption.numpy(), additional_captions.numpy()):
+            gts = [_seq_to_text(dataset_manager, ac) for ac in acs]
+            pred = _seq_to_text(dataset_manager, c)
+            predictions[sample_id] = [pred]
+            ground_truths[sample_id] = gts
+            sample_id += 1
+
+    scores = _compute_scores(ground_truths, predictions)
+    logger.info("========================================")
+    logger.info(f"-- Human Performance")
+    for metric, score in scores.items():
+        logger.info(f"-- {metric}: {score:0.5f}")
+    logger.info("========================================")
+
+
+def _compute_scores(ground_truths, predictions):
+    scorers = [
+        (Bleu(4), ["Bleu_1", "Bleu_2", "Bleu_3", "Bleu_4"]),
+        (Meteor(), "METEOR"),
+        (Rouge(), "ROUGE_L"),
+        (Cider(), "CIDEr"),
+        (Spice(), "SPICE")
+    ]
+    evaluation = {}
+    for scorer, method in scorers:
+        logger.info(f"-- Computing {scorer.method()} score")
+        score, scores = scorer.compute_score(ground_truths, predictions)
+        if type(method) == list:
+            for sc, scs, m in zip(score, scores, method):
+                evaluation[m] = sc
+        else:
+            evaluation[method] = score
+    return evaluation
 
 
 @tf.function
