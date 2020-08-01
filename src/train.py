@@ -29,6 +29,12 @@ class MonteCarloRollout:
         self.generator.set_weights(updated_weights)
 
     def calculate_rewards(self, encoder_output, captions, styles, discriminator, tokenizer, training):
+        """
+        Summary
+        1. Receives a caption input
+        2. For every position in the caption input
+            a. Generates a series (n_rollouts) of stochastic sequence with the initial sequence
+        """
         sequence_length = captions.shape[1]
         rewards = []
         for t in range(1, sequence_length):
@@ -46,6 +52,14 @@ class MonteCarloRollout:
 
 # @tf.function
 def generator_train_batch_pg(batch, generator, discriminator, optimizer, loss_fn, rollout, tokenizer, max_seq_len):
+    """
+    Summary
+    1. Extracts encoder_output and style from the batch
+    2. Initializes sos as initial_sequence for all examples iin the batch
+    3. Generates a stochastic caption for the image
+    4. Calculate rewards
+    5. convert reward to loss function
+    """
     with tf.GradientTape(watch_accessed_variables=False) as tape:
         tape.watch(generator.trainable_variables)
         encoder_output, styles = batch[0], batch[2]
@@ -106,6 +120,16 @@ def generator_loss_mle(batch, generator, loss_fn, dsa_lambda):
 
 @tf.function
 def discriminator_train_batch_mle(batches, discriminator, loss_fn, optimizer):
+    """
+    Summary
+    1. watch discriminator trainable_variables
+    2. extract encoder_output, labels, sample_weight, styles, captions from batch and make them tensors
+    3. predictions = discriminator(encoder_output, captions, styles, training=True)
+    4. loss = loss_fn(labels, predictions, sample_weight=sample_weight)
+    5. gradients = tape.gradient(loss, discriminator.trainable_variables))
+    6. optimizer.apply_gradients(zip(gradients, discriminator.trainable_variables))
+    """
+
     with tf.GradientTape(watch_accessed_variables=False) as tape:
         tape.watch(discriminator.trainable_variables)
         encoder_output = tf.concat([b[0] for b in batches], axis=0)
@@ -211,6 +235,15 @@ def pretrain_generator(args, dataset_manager):
 
 
 def pretrain_discriminator(args, dataset_manager):
+    """
+    Summary
+    1. Create true, fake(genrator), shuffled dataset of format (image, token_sequence, label, sample_weight, style)
+    2. loss = discriminator_train_batch_mle((true_batch, fake_batch, shuffled_batch), discriminator, loss_fn, optimizer)
+    3. Do the ff at the predetermined interval:
+        a. log
+        b. validate
+        c. checkpoint
+    """
     logger.info("***** Pretraining Discriminator - Started *****")
 
     set_seed(args.seed)
@@ -256,6 +289,7 @@ def pretrain_discriminator(args, dataset_manager):
         d["shuffled"] = dataset_manager.load_discriminator_dataset(
             split=s, batch_size=args.discriminator_pretrain_batch_size, repeat=r,
             label=0, randomize_captions=True, sample_weight=args.discriminator_pretrain_neg_sample_weight)
+        # {train,val}_dataset is (image, token_sequence, label, sample_weight, style) all in tf_tensors
 
     for true_batch, fake_batch, shuffled_batch in tqdm(zip(train_dataset["true"], train_dataset["fake"],
                                                            train_dataset["shuffled"]), desc="Batch", unit="batch"):
@@ -336,7 +370,7 @@ def adversarially_train_generator_and_discriminator(args, dataset_manager):
 
     logger.info("-- Loading training and validation sets")
     generator_train_dataset = iter(dataset_manager.load_generator_dataset(
-        "train", batch_size=args.generator_adversarial_batch_size, repeat=-1))
+        "train", batch_size=args.generator_adversarial_batch_size, repeat=-1)) # repeat indefinitely
     generator_val_dataset = dataset_manager.load_generator_dataset(
         "val", batch_size=args.generator_adversarial_batch_size, repeat=1)
     discriminator_train_dataset, discriminator_val_dataset = {}, {}
@@ -352,10 +386,10 @@ def adversarially_train_generator_and_discriminator(args, dataset_manager):
             label=0, randomize_captions=True, sample_weight=args.discriminator_adversarial_neg_sample_weight)
     discriminator_train_dataset = {k: iter(v) for k, v in discriminator_train_dataset.items()}
 
-    for round_ in range(1, args.adversarial_rounds):
+    for round_ in range(1, args.adversarial_rounds): #rouns = 10,000
         logger.info(f"-- Round: {round_}/{args.adversarial_rounds}")
 
-        for _ in tqdm(range(args.adversarial_g_steps), desc="Training Generator", unit="batch"):
+        for _ in tqdm(range(args.adversarial_g_steps), desc="Training Generator", unit="batch"): #adversarial_g_steps=1
             generator_step.assign_add(1)
             train_batch = next(generator_train_dataset)
             pg_loss, pg_reward = generator_train_batch_pg(train_batch, generator, discriminator, generator_optimizer,
@@ -371,7 +405,7 @@ def adversarially_train_generator_and_discriminator(args, dataset_manager):
                     tf.summary.scalar("nll_loss", mle_loss[1], step=generator_step)
                     tf.summary.scalar("dsa_loss", mle_loss[2], step=generator_step)
 
-        for _ in tqdm(range(args.adversarial_d_steps), desc="Training Discriminator", unit="batch"):
+        for _ in tqdm(range(args.adversarial_d_steps), desc="Training Discriminator", unit="batch"): #adversarial_d_steps=5
             discriminator_step.assign_add(1)
             true_batch = next(discriminator_train_dataset["true"])
             fake_batch = next(discriminator_train_dataset["fake"])

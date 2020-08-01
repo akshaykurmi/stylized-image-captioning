@@ -84,6 +84,13 @@ class DatasetManager:
         self.style_encoder.fit_on_labels([d["style"] for d in self.dataset.load("train")])
 
     def load_generator_dataset(self, split, batch_size, repeat):
+        """
+        if train or val:
+        return (image, caption_token_sequence, style)
+        if test:
+        return (image, caption_token_sequence, style, add_caption_token_sequence)
+        """
+
         tf_dataset = self._load_cached_dataset(split)
         tf_dataset = tf_dataset.shuffle(buffer_size=1000)
         if split == "test":
@@ -122,6 +129,7 @@ class DatasetManager:
         tf_dataset = tf_dataset.padded_batch(batch_size, padded_shapes=([10, 10, 2048], [None], [None], [None], []))
         tf_dataset = tf_dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
         tf_dataset = tf_dataset.repeat(repeat)
+        # tf_dataset contains (image, token_sequence, label, sample_weight, style_sequence) all in tf_tensors
         return tf_dataset
 
     def cache_dataset(self, split, batch_size, num_batches_per_shard):

@@ -30,14 +30,14 @@ class EncoderGeneratorAttention(tf.keras.layers.Layer):
         self.softmax = tf.keras.layers.Softmax()
 
     def call(self, encoder_output, carry_state):
-        attention_1 = self.encoder_attention(encoder_output)
-        attention_2 = self.generator_attention(carry_state)
-        attention_alpha = self.relu(attention_1 + tf.expand_dims(attention_2, axis=1))
-        attention_alpha = self.full_attention(attention_alpha)
-        attention_alpha = tf.squeeze(attention_alpha, axis=2)
-        attention_alpha = self.softmax(attention_alpha)
+        attention_1 = self.encoder_attention(encoder_output)  # Transforms from (3, 100, 2048) to (3, 100, units)
+        attention_2 = self.generator_attention(carry_state)  # Transforms from (3, lstm_units) to (3, units)
+        attention_alpha = self.relu(attention_1 + tf.expand_dims(attention_2, axis=1))  # (3, 100, units)
+        attention_alpha = self.full_attention(attention_alpha)  # (3, 100, 1)
+        attention_alpha = tf.squeeze(attention_alpha, axis=2)  # (3, 100)
+        attention_alpha = self.softmax(attention_alpha)  # (3, 100)
         attention_weighted_encoding = tf.reduce_sum((encoder_output * tf.expand_dims(attention_alpha, axis=2)), axis=1)
-        return attention_weighted_encoding, attention_alpha
+        return attention_weighted_encoding, attention_alpha # (3, 2048); (3, 100)
 
 
 class Generator(tf.keras.Model):
@@ -72,14 +72,26 @@ class Generator(tf.keras.Model):
         self.forward(tf.ones((3, 10, 10, 2048)), tf.ones((3, 10)), tf.ones((3,)), "deterministic", 1, False)
 
     def call(self, encoder_output, sequences_t, style_embeddings, memory_state, carry_state, training):
-        token_embeddings = self.token_embedding(sequences_t)
+        """
+        Summary
+        1. Takes encoder output and current lstm cell state (carry_state) and uses that to compute attention and
+        attention_weighted_encoding and attention_alpha
+        2. Takes token at timestep t, embeds it
+        3. generates the logits of the next_token
+
+        returns logits_t, attention_alpha, memory_state (h), carry_state(c)
+
+        """
+        token_embeddings = self.token_embedding(sequences_t) # (batch_size, token_embedding_units)
         attention_weighted_encoding, attention_alpha = self.attention(encoder_output, carry_state)
+        # (3, 2048); (3, 100)
         beta_gate = self.dense_f_beta(carry_state)
-        attention_weighted_encoding *= beta_gate
+        # transforms carry_state from (batch, lstm_units) to (batch, encoder_units) and sigmoids output
+        attention_weighted_encoding *= beta_gate #Not sure
         lstm_inputs = tf.concat([token_embeddings, attention_weighted_encoding], axis=1)
         if self.stylize:
             lstm_inputs = tf.concat([style_embeddings, lstm_inputs], axis=1)
-        _, (memory_state, carry_state) = self.lstm(lstm_inputs, [memory_state, carry_state])
+        _, (memory_state, carry_state) = self.lstm(lstm_inputs, [memory_state, carry_state]) #h, h, c = lstm(x, [h,c])
         logits_t = self.dense_lstm_output(self.dropout(carry_state, training=training))
         return logits_t, attention_alpha, memory_state, carry_state
 
@@ -107,6 +119,8 @@ class Generator(tf.keras.Model):
                                           element_shape=(batch_size, image_features_size))
         for t in range(max_seq_len):
             batch_size_t = tf.reduce_sum(tf.cast(sequence_lengths > t, dtype=tf.int32))
+            # number of ex in batch with length greater than t
+
             sequences_t = sequences[:, t]
             if t > 0 and np.random.uniform() > teacher_forcing_rate:
                 if mode == "deterministic":
@@ -132,6 +146,14 @@ class Generator(tf.keras.Model):
 
     def sample(self, encoder_output, initial_sequence, styles, sequence_length, mode, n_samples, training,
                sos, eos, z=None):
+        """
+        Summary
+        1. Takes an initial token sequence
+        2. Generates the next token
+        3. If deterministic, next token is the argmax. If stochastic, the next token is sampled
+
+        Returns samples, sample_logits
+        """
         if mode not in ["stochastic", "deterministic"]:
             raise ValueError(f"Mode must be one of - stochastic, deterministic")
 
@@ -154,7 +176,7 @@ class Generator(tf.keras.Model):
         samples = []
         sample_logits = []
         for n in range(n_samples):
-            sequence = [tf.identity(s) for s in initial_sequence]
+            sequence = [tf.identity(s) for s in initial_sequence] # tf.identity is like tensor.copy()
             logits = [tf.identity(l) for l in initial_logits]
             memory_state, carry_state = tf.identity(initial_memory_state), tf.identity(initial_carry_state)
             for t in range(initial_sequence_length, sequence_length):
@@ -165,7 +187,7 @@ class Generator(tf.keras.Model):
                 else:
                     sequence.append(tfp.distributions.Categorical(logits=logits_t, dtype=tf.int64).sample())
                 logits.append(logits_t)
-            sequence = tf.stack(sequence, axis=1)
+            sequence = tf.stack(sequence, axis=1) # converts the list of tensors into a tensor
             logits = tf.stack(logits, axis=1)
 
             oh = tf.expand_dims(tf.math.log(
@@ -292,7 +314,7 @@ class Discriminator(tf.keras.Model):
     def call(self, encoder_output, sequences, styles, training):
         encoder_output = self.pooling(encoder_output)
         token_embeddings = self.token_embedding(sequences)
-        mask = self.token_embedding.compute_mask(sequences)
+        mask = self.token_embedding.compute_mask(sequences) #Needed to mask the token emb
         lstm1_out = self.lstm1(token_embeddings, mask=mask, training=training)
         lstm2_out = self.lstm2(lstm1_out, mask=mask, training=training)
         all_features = tf.concat([encoder_output, lstm2_out], axis=1)
