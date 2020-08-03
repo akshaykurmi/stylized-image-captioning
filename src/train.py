@@ -33,7 +33,12 @@ class MonteCarloRollout:
         Summary
         1. Receives a caption input
         2. For every position in the caption input
-            a. Generates a series (n_rollouts) of stochastic sequence with the initial sequence
+            a. Generates a series (n_rollouts) of stochastic sequence with the initial_sequence as the supplied
+            caption up to that position
+            b. Calculate the mean of the discriminator scores for the sequence. This is the reward for this
+            position
+        3. Return this list of rewards as tf_tensor
+
         """
         sequence_length = captions.shape[1]
         rewards = []
@@ -57,8 +62,8 @@ def generator_train_batch_pg(batch, generator, discriminator, optimizer, loss_fn
     1. Extracts encoder_output and style from the batch
     2. Initializes sos as initial_sequence for all examples iin the batch
     3. Generates a stochastic caption for the image
-    4. Calculate rewards
-    5. convert reward to loss function
+    4. Calculate rewards -> This does the PG sampling
+    5. convert reward list to loss via loss_fn
     """
     with tf.GradientTape(watch_accessed_variables=False) as tape:
         tape.watch(generator.trainable_variables)
