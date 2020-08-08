@@ -32,6 +32,8 @@ parser.add_argument("--checkpoint_to_generate_from", default="")
 
 parser.add_argument("--stylize", default=False, action="store_true")
 
+parser.add_argument("--id_gpu", default="0", type=str)
+
 args = parser.parse_args()
 
 args.run_id = f"run_{args.run_id}"
@@ -136,3 +138,8 @@ if args.run_human_evaluation:
 
 if args.generate_captions_for_image:
     generate_captions_for_image(args, dataset_manager, int(args.checkpoint_to_generate_from))
+
+if args.id_gpu >= 0:
+    os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+    # The GPU id to use
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(args.id_gpu)
