@@ -4,6 +4,6 @@
 __pycache__
 results
 personality_captions_data
-
+env
 *.iml
 
