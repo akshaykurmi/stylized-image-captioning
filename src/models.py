@@ -39,6 +39,81 @@ class EncoderGeneratorAttention(tf.keras.layers.Layer):
         attention_weighted_encoding = tf.reduce_sum((encoder_output * tf.expand_dims(attention_alpha, axis=2)), axis=1)
         return attention_weighted_encoding, attention_alpha # (3, 2048); (3, 100)
 
+class SemanticDiscriminator(tf.keras.layers.Layer):
+    def __init__(self, token_vocab_size, token_embedding_units, lstm_units):
+        super().__init__()
+        #self.stylize = stylize
+        self.pooling = tf.keras.layers.GlobalAveragePooling2D()
+        self.token_embedding = tf.keras.layers.Embedding(input_dim=token_vocab_size, output_dim=token_embedding_units,
+                                                         mask_zero=True)
+        #self.style_embedding = tf.keras.layers.Embedding(input_dim=style_vocab_size, output_dim=style_embedding_units)
+        self.lstm1 = tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(
+            units=lstm_units, activation="tanh", return_sequences=True, dropout=0.2, recurrent_dropout=0.2
+        ))
+        self.lstm2 = tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(
+            units=lstm_units, activation="tanh", dropout=0.2, recurrent_dropout=0.2
+        ))
+        self.dense1 = tf.keras.layers.Dense(units=1024, activation="relu")
+        self.dropout1 = tf.keras.layers.Dropout(rate=0.5)
+        self.dense2 = tf.keras.layers.Dense(units=512, activation="relu")
+        self.dense3 = tf.keras.layers.Dense(units=1, activation="sigmoid")
+
+        self.call(tf.ones((3, 10, 10, 2048)), tf.ones((3, 10)), False)
+
+    def call(self, encoder_output, sequences, training):
+        encoder_output = self.pooling(encoder_output)
+        token_embeddings = self.token_embedding(sequences)
+        mask = self.token_embedding.compute_mask(sequences) #Needed to mask the token emb
+        lstm1_out = self.lstm1(token_embeddings, mask=mask, training=training)
+        lstm2_out = self.lstm2(lstm1_out, mask=mask, training=training)
+        all_features = tf.concat([encoder_output, lstm2_out], axis=1)
+        # if self.stylize:
+        #     style_embeddings = self.style_embedding(styles)
+        #     all_features = tf.concat([all_features, style_embeddings], axis=1)
+        x = self.dense1(all_features)
+        x = self.dropout1(x, training=training)
+        x = self.dense2(x)
+        x = self.dense3(x)
+        return x
+
+
+class StyleDiscriminator(tf.keras.layers.Layer):
+    def __init__(self, token_vocab_size, style_vocab_size, token_embedding_units, style_embedding_units,
+                 lstm_units):
+        super().__init__()
+        #self.stylize = stylize
+        self.pooling = tf.keras.layers.GlobalAveragePooling2D()
+        self.token_embedding = tf.keras.layers.Embedding(input_dim=token_vocab_size, output_dim=token_embedding_units,
+                                                         mask_zero=True)
+        self.style_embedding = tf.keras.layers.Embedding(input_dim=style_vocab_size, output_dim=style_embedding_units)
+        self.lstm1 = tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(
+            units=lstm_units, activation="tanh", return_sequences=True, dropout=0.2, recurrent_dropout=0.2
+        ))
+        self.lstm2 = tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(
+            units=lstm_units, activation="tanh", dropout=0.2, recurrent_dropout=0.2
+        ))
+        self.dense1 = tf.keras.layers.Dense(units=1024, activation="relu")
+        self.dropout1 = tf.keras.layers.Dropout(rate=0.5)
+        self.dense2 = tf.keras.layers.Dense(units=512, activation="relu")
+        self.dense3 = tf.keras.layers.Dense(units=1, activation="sigmoid")
+
+        self.call(tf.ones((3, 10)), tf.ones((3,)), False)
+
+    def call(self, sequences, styles, training):
+        #encoder_output = self.pooling(encoder_output)
+        token_embeddings = self.token_embedding(sequences)
+        mask = self.token_embedding.compute_mask(sequences) #Needed to mask the token emb
+        lstm1_out = self.lstm1(token_embeddings, mask=mask, training=training)
+        lstm2_out = self.lstm2(lstm1_out, mask=mask, training=training)
+        #all_features = tf.concat([encoder_output, lstm2_out], axis=1)
+        #if self.stylize:
+        style_embeddings = self.style_embedding(styles)
+        all_features = tf.concat([lstm2_out, style_embeddings], axis=1)
+        x = self.dense1(all_features)
+        x = self.dropout1(x, training=training)
+        x = self.dense2(x)
+        x = self.dense3(x)
+        return x
 
 class Generator(tf.keras.Model):
     def __init__(self, token_vocab_size, style_vocab_size, token_embedding_units, style_embedding_units,
@@ -326,3 +401,21 @@ class Discriminator(tf.keras.Model):
         x = self.dense2(x)
         x = self.dense3(x)
         return x
+
+class Discriminator2(tf.keras.Model):
+    def __init__(self, token_vocab_size, style_vocab_size, token_embedding_units, style_embedding_units,
+                 lstm_units, stylize, alpha=0.5):
+        super().__init__()
+        self.stylize = stylize
+        self.alpha = alpha
+        self.semantic_discriminator = SemanticDiscriminator(token_vocab_size, token_embedding_units, lstm_units)
+        self.style_discriminator = StyleDiscriminator(token_vocab_size, style_vocab_size, token_embedding_units, style_embedding_units, lstm_units)
+
+        self.call(tf.ones((3, 10, 10, 2048)), tf.ones((3, 10)), tf.ones((3,)), False)
+
+    def call(self, encoder_output, sequences, styles, training):
+
+        semantic_score = self.semantic_discriminator(encoder_output, sequences, training)
+        style_score = self.style_discriminator(sequences, styles, training)
+
+        return semantic_score*self.alpha + style_score*(1-self.alpha)
