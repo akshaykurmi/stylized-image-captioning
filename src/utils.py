@@ -51,3 +51,8 @@ class MultiCheckpointManager:
     def save(self, checkpoint_names):
         for checkpoint_name in checkpoint_names:
             self.checkpoint_managers[checkpoint_name].save()
+
+    def print_state(self):
+        print("Checkpoint Manager state")
+        for checkpoint_name in self.checkpoints.keys():
+            print(checkpoint_name, self.checkpoint_managers[checkpoint_name].latest_checkpoint)
