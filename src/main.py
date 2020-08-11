@@ -7,7 +7,7 @@ import shutil
 from .datasets import PersonalityCaptions, DatasetManager
 from .evaluate import generate_captions_for_image, score_on_test_set, human_performance_on_test_set
 from .schedules import ExponentialSchedule
-from .train import pretrain_generator, pretrain_discriminator, adversarially_train_generator_and_discriminator
+from .train import pretrain_generator, pretrain_discriminator, pretrain_discriminator2, adversarially_train_generator_and_discriminator, adversarially_train_generator_and_discriminator2
 from .utils import init_logging
 
 logger = logging.getLogger(__name__)
@@ -22,7 +22,9 @@ parser.add_argument("--run_download_dataset", default=False, action="store_true"
 parser.add_argument("--run_cache_dataset", default=False, action="store_true")
 parser.add_argument("--run_generator_pretraining", default=False, action="store_true")
 parser.add_argument("--run_discriminator_pretraining", default=False, action="store_true")
+parser.add_argument("--run_discriminator2_pretraining", default=False, action="store_true")
 parser.add_argument("--run_adversarial_training", default=False, action="store_true")
+parser.add_argument("--run_adversarial2_training", default=False, action="store_true")
 
 parser.add_argument("--run_human_evaluation", default=False, action="store_true")
 parser.add_argument("--run_evaluation", default=False, action="store_true")
@@ -96,6 +98,8 @@ args.adversarial_d_steps = 5
 args.adversarial_rollout_n = 5
 args.adversarial_rollout_update_rate = 1
 
+args.alpha = 0.5
+
 init_logging(args.log_dir)
 
 personality_captions = PersonalityCaptions(args.data_dir)
@@ -124,10 +128,20 @@ if args.run_discriminator_pretraining:
         shutil.rmtree(args.run_dir, ignore_errors=True)
     pretrain_discriminator(args, dataset_manager)
 
+if args.run_discriminator2_pretraining:
+    if args.overwrite_run_results:
+        shutil.rmtree(args.run_dir, ignore_errors=True)
+    pretrain_discriminator2(args, dataset_manager)
+
 if args.run_adversarial_training:
     if args.overwrite_run_results:
         shutil.rmtree(args.run_dir, ignore_errors=True)
     adversarially_train_generator_and_discriminator(args, dataset_manager)
+
+if args.run_adversarial2_training:
+    if args.overwrite_run_results:
+        shutil.rmtree(args.run_dir, ignore_errors=True)
+    adversarially_train_generator_and_discriminator2(args, dataset_manager)
 
 if args.run_evaluation:
     checkpoint_numbers = [int(c) for c in args.checkpoints_to_evaluate.split(",")]

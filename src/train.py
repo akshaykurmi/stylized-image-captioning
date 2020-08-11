@@ -6,7 +6,7 @@ import tensorflow as tf
 from tqdm import tqdm
 
 from .losses import GeneratorMLELoss, PolicyGradientLoss
-from .models import Generator, Discriminator
+from .models import Generator, Discriminator, Discriminator2
 from .utils import set_seed, MultiCheckpointManager
 
 logger = logging.getLogger(__name__)
@@ -277,7 +277,7 @@ def pretrain_discriminator(args, dataset_manager):
     global_step = tf.Variable(0, dtype=tf.int64, trainable=False)
     checkpoint_manager = MultiCheckpointManager(args.checkpoints_dir, {
         "generator": {"generator": generator},
-        "discriminator": {"discriminator": discriminator},
+        "discriminator": {"discriminator2": discriminator},
         "discriminator_pretrain_params": {"optimizer": optimizer, "global_step": global_step}
     })
     checkpoint_manager.restore_latest()
@@ -322,6 +322,88 @@ def pretrain_discriminator(args, dataset_manager):
     checkpoint_manager.save(["discriminator", "discriminator_pretrain_params"])
     logger.info("***** Pretraining Discriminator - Ended *****")
 
+def pretrain_discriminator2(args, dataset_manager):
+    """
+    Summary
+    1. Create true, fake(genrator), shuffled dataset of format (image, token_sequence, label, sample_weight, style)
+    2. loss = discriminator_train_batch_mle((true_batch, fake_batch, shuffled_batch), discriminator, loss_fn, optimizer)
+    3. Do the ff at the predetermined interval:
+        a. log
+        b. validate
+        c. checkpoint
+    """
+    logger.info("***** Pretraining Discriminator2 - Started *****")
+
+    set_seed(args.seed)
+
+    logger.info("-- Initializing")
+    generator = Generator(token_vocab_size=dataset_manager.tokenizer.vocab_size,
+                          style_vocab_size=dataset_manager.style_encoder.num_classes,
+                          style_embedding_units=args.generator_style_embedding_units,
+                          token_embedding_units=args.generator_token_embedding_units,
+                          lstm_units=args.generator_lstm_units, lstm_dropout=args.generator_lstm_dropout,
+                          attention_units=args.generator_attention_units, encoder_units=args.generator_encoder_units,
+                          z_units=args.generator_z_units, stylize=args.stylize)
+    discriminator = Discriminator2(token_vocab_size=dataset_manager.tokenizer.vocab_size,
+                                  style_vocab_size=dataset_manager.style_encoder.num_classes,
+                                  token_embedding_units=args.discriminator_token_embedding_units,
+                                  style_embedding_units=args.discriminator_style_embedding_units,
+                                  lstm_units=args.discriminator_lstm_units, stylize=args.stylize, alpha=0.5)
+
+    loss_fn = tf.keras.losses.BinaryCrossentropy()
+    optimizer = tf.keras.optimizers.Adam(learning_rate=args.discriminator_pretrain_learning_rate,
+                                         clipvalue=args.discriminator_pretrain_grad_clipvalue)
+
+    train_summary_writer = tf.summary.create_file_writer(os.path.join(args.log_dir, "train"))
+    val_summary_writer = tf.summary.create_file_writer(os.path.join(args.log_dir, "val"))
+
+    global_step = tf.Variable(0, dtype=tf.int64, trainable=False)
+    checkpoint_manager = MultiCheckpointManager(args.checkpoints_dir, {
+        "generator": {"generator": generator},
+        "discriminator2": {"discriminator2": discriminator},
+        "discriminator2_pretrain_params": {"optimizer": optimizer, "global_step": global_step}
+    })
+    checkpoint_manager.restore_latest()
+
+    logger.info("-- Loading training and validation sets")
+    train_dataset, val_dataset = {}, {}
+    for s, d, r in [("train", train_dataset, args.discriminator_pretrain_epochs), ("val", val_dataset, 1)]:
+        d["true"] = dataset_manager.load_discriminator_dataset(
+            split=s, batch_size=args.discriminator_pretrain_batch_size, repeat=r,
+            label=1, randomize_captions=False, sample_weight=1)
+        d["fake"] = dataset_manager.load_discriminator_dataset(
+            split=s, batch_size=args.discriminator_pretrain_batch_size, repeat=r,
+            label=0, randomize_captions=False, sample_weight=args.discriminator_pretrain_neg_sample_weight)
+        d["shuffled"] = dataset_manager.load_discriminator_dataset(
+            split=s, batch_size=args.discriminator_pretrain_batch_size, repeat=r,
+            label=0, randomize_captions=True, sample_weight=args.discriminator_pretrain_neg_sample_weight)
+        # {train,val}_dataset is (image, token_sequence, label, sample_weight, style) all in tf_tensors
+
+    for true_batch, fake_batch, shuffled_batch in tqdm(zip(train_dataset["true"], train_dataset["fake"],
+                                                           train_dataset["shuffled"]), desc="Batch", unit="batch"):
+        global_step.assign_add(1)
+        fake_batch = generate_fake_captions(fake_batch, generator, dataset_manager.tokenizer, args.max_seq_len)
+        loss = discriminator_train_batch_mle((true_batch, fake_batch, shuffled_batch), discriminator, loss_fn,
+                                             optimizer)
+        if global_step % args.discriminator_pretrain_logging_steps == 0:
+            with train_summary_writer.as_default(), tf.name_scope("discriminator2_pretraining"):
+                tf.summary.scalar("nll_loss", loss, step=global_step)
+        if global_step % args.discriminator_pretrain_validate_steps == 0:
+            logger.info("-- Calculating validation loss")
+            losses = []
+            for val_true_batch, val_fake_batch, val_shuffled_batch in zip(val_dataset["true"], val_dataset["fake"],
+                                                                          val_dataset["shuffled"]):
+                val_fake_batch = generate_fake_captions(val_fake_batch, generator, dataset_manager.tokenizer,
+                                                        args.max_seq_len)
+                losses.append(discriminator_loss_mle((val_true_batch, val_fake_batch, val_shuffled_batch),
+                                                     discriminator, loss_fn))
+            with val_summary_writer.as_default(), tf.name_scope("discriminator2_pretraining"):
+                tf.summary.scalar("nll_loss", tf.reduce_mean(losses), step=global_step)
+        if global_step % args.discriminator_pretrain_checkpoint_steps == 0:
+            checkpoint_manager.save(["discriminator2", "discriminator2_pretrain_params"])
+
+    checkpoint_manager.save(["discriminator2", "discriminator2_pretrain_params"])
+    logger.info("***** Pretraining Discriminator2 - Ended *****")
 
 def adversarially_train_generator_and_discriminator(args, dataset_manager):
     logger.info("***** Adversarially training Generator & Discriminator - Started *****")
@@ -463,3 +545,144 @@ def adversarially_train_generator_and_discriminator(args, dataset_manager):
 
     checkpoint_manager.save(["generator", "discriminator", "adversarial_params"])
     logger.info("***** Adversarially training Generator & Discriminator - Ended *****")
+
+def adversarially_train_generator_and_discriminator2(args, dataset_manager):
+    logger.info("***** Adversarially training Generator & Discriminator2 - Started *****")
+
+    set_seed(args.seed)
+
+    logger.info("-- Initializing")
+    generator = Generator(token_vocab_size=dataset_manager.tokenizer.vocab_size,
+                          style_vocab_size=dataset_manager.style_encoder.num_classes,
+                          style_embedding_units=args.generator_style_embedding_units,
+                          token_embedding_units=args.generator_token_embedding_units,
+                          lstm_units=args.generator_lstm_units, lstm_dropout=args.generator_lstm_dropout,
+                          attention_units=args.generator_attention_units, encoder_units=args.generator_encoder_units,
+                          z_units=args.generator_z_units, stylize=args.stylize)
+    generator_mc = Generator(token_vocab_size=dataset_manager.tokenizer.vocab_size,
+                             style_vocab_size=dataset_manager.style_encoder.num_classes,
+                             style_embedding_units=args.generator_style_embedding_units,
+                             token_embedding_units=args.generator_token_embedding_units,
+                             lstm_units=args.generator_lstm_units, lstm_dropout=args.generator_lstm_dropout,
+                             attention_units=args.generator_attention_units, encoder_units=args.generator_encoder_units,
+                             z_units=args.generator_z_units, stylize=args.stylize)
+    discriminator = Discriminator2(token_vocab_size=dataset_manager.tokenizer.vocab_size,
+                                  style_vocab_size=dataset_manager.style_encoder.num_classes,
+                                  token_embedding_units=args.discriminator_token_embedding_units,
+                                  style_embedding_units=args.discriminator_style_embedding_units,
+                                  lstm_units=args.discriminator_lstm_units, stylize=args.stylize, alpha=args.alpha)
+    rollout = MonteCarloRollout(generator_mc, args.adversarial_rollout_n, args.adversarial_rollout_update_rate)
+    rollout.update_weights(generator)
+
+    generator_loss_fn_pg = PolicyGradientLoss()
+    generator_loss_fn_mle = GeneratorMLELoss()
+    discriminator_loss_fn = tf.keras.losses.BinaryCrossentropy()
+    generator_optimizer = tf.keras.optimizers.Adam(learning_rate=args.generator_adversarial_learning_rate,
+                                                   clipvalue=args.generator_adversarial_grad_clipvalue)
+    discriminator_optimizer = tf.keras.optimizers.Adam(learning_rate=args.discriminator_adversarial_learning_rate,
+                                                       clipvalue=args.discriminator_adversarial_grad_clipvalue)
+
+    train_summary_writer = tf.summary.create_file_writer(os.path.join(args.log_dir, "train"))
+    val_summary_writer = tf.summary.create_file_writer(os.path.join(args.log_dir, "val"))
+
+    generator_step = tf.Variable(0, dtype=tf.int64, trainable=False)
+    discriminator_step = tf.Variable(0, dtype=tf.int64, trainable=False)
+    checkpoint_manager = MultiCheckpointManager(args.checkpoints_dir, {
+        "generator": {"generator": generator},
+        "discriminator2": {"discriminator2": discriminator},
+        "adversarial_params": {"generator_optimizer": generator_optimizer,
+                               "discriminator_optimizer": discriminator_optimizer,
+                               "generator_step": generator_step, "discriminator_step": discriminator_step}
+    })
+    checkpoint_manager.restore_latest()
+
+    logger.info("-- Loading training and validation sets")
+    generator_train_dataset = iter(dataset_manager.load_generator_dataset(
+        "train", batch_size=args.generator_adversarial_batch_size, repeat=-1)) # repeat indefinitely
+    generator_val_dataset = dataset_manager.load_generator_dataset(
+        "val", batch_size=args.generator_adversarial_batch_size, repeat=1)
+    discriminator_train_dataset, discriminator_val_dataset = {}, {}
+    for s, d, r in [("train", discriminator_train_dataset, -1), ("val", discriminator_val_dataset, 1)]:
+        d["true"] = dataset_manager.load_discriminator_dataset(
+            split=s, batch_size=args.discriminator_adversarial_batch_size, repeat=r,
+            label=1, randomize_captions=False, sample_weight=1)
+        d["fake"] = dataset_manager.load_discriminator_dataset(
+            split=s, batch_size=args.discriminator_adversarial_batch_size, repeat=r,
+            label=0, randomize_captions=False, sample_weight=args.discriminator_adversarial_neg_sample_weight)
+        d["shuffled"] = dataset_manager.load_discriminator_dataset(
+            split=s, batch_size=args.discriminator_adversarial_batch_size, repeat=r,
+            label=0, randomize_captions=True, sample_weight=args.discriminator_adversarial_neg_sample_weight)
+    discriminator_train_dataset = {k: iter(v) for k, v in discriminator_train_dataset.items()}
+
+    for round_ in range(1, args.adversarial_rounds): #rouns = 10,000
+        logger.info(f"-- Round: {round_}/{args.adversarial_rounds}")
+
+        for _ in tqdm(range(args.adversarial_g_steps), desc="Training Generator", unit="batch"): #adversarial_g_steps=1
+            generator_step.assign_add(1)
+            train_batch = next(generator_train_dataset)
+            pg_loss, pg_reward = generator_train_batch_pg(train_batch, generator, discriminator, generator_optimizer,
+                                                          generator_loss_fn_pg, rollout, dataset_manager.tokenizer,
+                                                          args.max_seq_len)
+            if generator_step % args.generator_adversarial_logging_steps == 0:
+                mle_loss = generator_loss_mle(train_batch, generator, generator_loss_fn_mle,
+                                              args.generator_adversarial_dsa_lambda)
+                with train_summary_writer.as_default(), tf.name_scope("generator_adversarial_training"):
+                    tf.summary.scalar("policy_gradient_loss", pg_loss, step=generator_step)
+                    tf.summary.scalar("policy_gradient_reward", pg_reward, step=generator_step)
+                    tf.summary.scalar("mle_loss", mle_loss[0], step=generator_step)
+                    tf.summary.scalar("nll_loss", mle_loss[1], step=generator_step)
+                    tf.summary.scalar("dsa_loss", mle_loss[2], step=generator_step)
+
+        for _ in tqdm(range(args.adversarial_d_steps), desc="Training Discriminator2", unit="batch"): #adversarial_d_steps=5
+            discriminator_step.assign_add(1)
+            true_batch = next(discriminator_train_dataset["true"])
+            fake_batch = next(discriminator_train_dataset["fake"])
+            shuffled_batch = next(discriminator_train_dataset["shuffled"])
+            fake_batch = generate_fake_captions(fake_batch, generator, dataset_manager.tokenizer,
+                                                args.max_seq_len)
+            loss = discriminator_train_batch_mle((true_batch, fake_batch, shuffled_batch), discriminator,
+                                                 discriminator_loss_fn, discriminator_optimizer)
+            if discriminator_step % args.discriminator_adversarial_logging_steps == 0:
+                with train_summary_writer.as_default(), tf.name_scope("discriminator2_adversarial_training"):
+                    tf.summary.scalar("nll_loss", loss, step=discriminator_step)
+
+        rollout.update_weights(generator)
+
+        if round_ % args.adversarial_checkpoint_rounds:
+            checkpoint_manager.save(["generator", "discriminator", "adversarial_params"])
+
+        if round_ % args.adversarial_validate_rounds == 0:
+            logger.info("-- Calculating generator validation loss")
+            generator_losses = defaultdict(list)
+            for val_batch in generator_val_dataset:
+                generator_losses["pg"].append(
+                    generator_loss_pg(val_batch, generator, discriminator, generator_loss_fn_pg, rollout,
+                                      dataset_manager.tokenizer, args.max_seq_len)
+                )
+                generator_losses["mle"].append(generator_loss_mle(val_batch, generator, generator_loss_fn_mle,
+                                                                  args.generator_adversarial_dsa_lambda))
+            generator_losses["pg"] = list(zip(*generator_losses["pg"]))
+            generator_losses["mle"] = list(zip(*generator_losses["mle"]))
+            with val_summary_writer.as_default(), tf.name_scope("generator_adversarial_training"):
+                tf.summary.scalar("policy_gradient_loss", tf.reduce_mean(generator_losses["pg"][0]),
+                                  step=generator_step)
+                tf.summary.scalar("policy_gradient_reward", tf.reduce_mean(generator_losses["pg"][1]),
+                                  step=generator_step)
+                tf.summary.scalar("mle_loss", tf.reduce_mean(generator_losses["mle"][0]), step=generator_step)
+                tf.summary.scalar("nll_loss", tf.reduce_mean(generator_losses["mle"][1]), step=generator_step)
+                tf.summary.scalar("dsa_loss", tf.reduce_mean(generator_losses["mle"][2]), step=generator_step)
+
+            logger.info("-- Calculating discriminator validation loss")
+            discriminator_losses = []
+            for val_true_batch, val_fake_batch, val_shuffled_batch in zip(discriminator_val_dataset["true"],
+                                                                          discriminator_val_dataset["fake"],
+                                                                          discriminator_val_dataset["shuffled"]):
+                val_fake_batch = generate_fake_captions(val_fake_batch, generator, dataset_manager.tokenizer,
+                                                        args.max_seq_len)
+                discriminator_losses.append(discriminator_loss_mle((val_true_batch, val_fake_batch, val_shuffled_batch),
+                                                                   discriminator, discriminator_loss_fn))
+            with val_summary_writer.as_default(), tf.name_scope("discriminator_adversarial_training"):
+                tf.summary.scalar("nll_loss", tf.reduce_mean(discriminator_losses), step=discriminator_step)
+
+    checkpoint_manager.save(["generator", "discriminator2", "adversarial_params"])
+    logger.info("***** Adversarially training Generator & Discriminator2 - Ended *****")
